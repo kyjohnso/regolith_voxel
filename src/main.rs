@@ -696,8 +696,6 @@ fn load_equipment_sprites(
         create_colored_sprite(&mut images, [100, 255, 100, 255]), // Green
     );
 
-    println!("Equipment sprites generated");
-
     commands.insert_resource(EquipmentSprites { sprites });
 }
 
@@ -735,9 +733,6 @@ fn spawn_equipment_sprites(
                         )
                     });
 
-                    println!("Spawning equipment sprite: id={}, type={:?}, pos={:?}",
-                        node.id, equipment_type, position);
-
                     commands.spawn((
                         Sprite::from_image(sprite_handle.clone()),
                         Transform::from_translation(position.extend(1.0)),
@@ -745,8 +740,6 @@ fn spawn_equipment_sprites(
                             equipment_id: node.id,
                         },
                     ));
-                } else {
-                    println!("No sprite handle found for equipment type: {:?}", equipment_type);
                 }
             }
         }
@@ -788,13 +781,11 @@ fn click_select_equipment(
     mut contexts: bevy_egui::EguiContexts,
 ) {
     if mouse_button.just_pressed(MouseButton::Left) {
-        let over_ui = contexts.ctx_mut().is_pointer_over_area();
-        println!("Left click detected, over UI: {}", over_ui);
-
         // Don't process clicks if hovering over UI
-        if over_ui {
+        if contexts.ctx_mut().is_pointer_over_area() {
             return;
         }
+
         let Ok(window) = windows.single() else {
             return;
         };
@@ -811,27 +802,19 @@ fn click_select_equipment(
         let Ok(world_position) = camera
             .viewport_to_world_2d(camera_transform, cursor_position)
         else {
-            println!("Failed to convert cursor to world position");
             return;
         };
-
-        println!("Cursor screen: {:?}, world: {:?}", cursor_position, world_position);
 
         // Check if we clicked on any equipment
         let mut clicked_id: Option<usize> = None;
         let sprite_size = 64.0; // Equipment sprite click radius (increased for easier clicking)
 
-        println!("Checking {} equipment sprites", equipment_query.iter().count());
         for (transform, equipment_sprite) in &equipment_query {
             let sprite_pos = transform.translation.truncate();
             let distance = world_position.distance(sprite_pos);
 
-            println!("  Equipment {} at {:?}, distance: {}",
-                equipment_sprite.equipment_id, sprite_pos, distance);
-
             if distance < sprite_size {
                 clicked_id = Some(equipment_sprite.equipment_id);
-                println!("  -> HIT! Clicked on equipment: {}", equipment_sprite.equipment_id);
                 break;
             }
         }
@@ -843,7 +826,6 @@ fn click_select_equipment(
         equipment_actions.selected.clear();
         if let Some(id) = clicked_id {
             equipment_actions.selected.insert(id);
-            println!("Selected equipment: {}", id);
         }
 
         // Activate/deactivate equipment - helper function to recursively update
@@ -1165,19 +1147,15 @@ fn update_selection_outlines(
 
     // If we have a selection, make sure it has an outline
     if let Some(id) = selected_id {
-        println!("Selected ID: {}, creating outline if needed", id);
-
         // Check if an outline already exists for this equipment
         let outline_exists = outline_query
             .iter()
             .any(|(_, _, outline)| outline.equipment_id == id);
 
         if !outline_exists {
-            println!("No outline exists, searching for equipment sprite with id {}", id);
             // Find the equipment sprite to get its position
             for (transform, equipment_sprite) in equipment_query.iter() {
                 if equipment_sprite.equipment_id == id {
-                    println!("Found equipment sprite at position: {:?}", transform.translation);
                     // Create a green outline sprite
                     let outline_size = 40;
                     let inner_size = 34; // Inner transparent area
