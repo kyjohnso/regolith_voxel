@@ -1,8 +1,10 @@
 [package]
 name = "regolith_voxel"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
 bevy = "0.16.1"
 bevy_egui = "0.34.0"
+noise = "0.9"
+rand = "0.8"
