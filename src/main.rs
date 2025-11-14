@@ -35,6 +35,7 @@ fn main() {
             click_select_equipment,
             move_selected_equipment,
             update_equipment_positions,
+            update_selection_outlines,
         ))
         .run();
 }
@@ -370,16 +371,34 @@ impl Default for EquipmentTreeState {
     fn default() -> Self {
         let mut next_id = 0;
 
-        // Create initial container nodes for each equipment type
+        // Create initial container nodes for each equipment type with some sample equipment
         let nodes = vec![
             {
-                let container = EquipmentTreeNode::container(next_id, "Samplers");
+                let mut container = EquipmentTreeNode::container(next_id, "Samplers");
                 next_id += 1;
+
+                // Add a sample sampler
+                container.children.push(EquipmentTreeNode::equipment(
+                    next_id,
+                    "Sampler Unit 1",
+                    EquipmentType::Sampler
+                ));
+                next_id += 1;
+
                 container
             },
             {
-                let container = EquipmentTreeNode::container(next_id, "Surface Mining");
+                let mut container = EquipmentTreeNode::container(next_id, "Surface Mining");
                 next_id += 1;
+
+                // Add a sample surface miner
+                container.children.push(EquipmentTreeNode::equipment(
+                    next_id,
+                    "Surface Miner 1",
+                    EquipmentType::SurfaceMining
+                ));
+                next_id += 1;
+
                 container
             },
             {
@@ -517,6 +536,12 @@ struct EquipmentSprite {
     equipment_id: usize,
 }
 
+// Component to mark selection outline sprites
+#[derive(Component)]
+struct SelectionOutline {
+    equipment_id: usize,
+}
+
 // Resource to track selected equipment
 #[derive(Resource, Default)]
 struct SelectedEquipment {
@@ -605,33 +630,73 @@ fn camera_control_system(
     }
 }
 
-// Load equipment sprites
+// Load equipment sprites - generate them programmatically
 fn load_equipment_sprites(
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
+    mut images: ResMut<Assets<Image>>,
 ) {
     let mut sprites = std::collections::HashMap::new();
 
+    // Helper to create a colored square sprite
+    fn create_colored_sprite(images: &mut ResMut<Assets<Image>>, color: [u8; 4]) -> Handle<Image> {
+        let size = 32;
+        let mut pixel_data = Vec::new();
+        for y in 0..size {
+            for x in 0..size {
+                // Create a border effect
+                if x < 2 || x >= size - 2 || y < 2 || y >= size - 2 {
+                    // Border - slightly darker
+                    pixel_data.extend_from_slice(&[
+                        (color[0] as f32 * 0.7) as u8,
+                        (color[1] as f32 * 0.7) as u8,
+                        (color[2] as f32 * 0.7) as u8,
+                        color[3],
+                    ]);
+                } else {
+                    // Inner color
+                    pixel_data.extend_from_slice(&color);
+                }
+            }
+        }
+
+        let image = Image::new(
+            Extent3d {
+                width: size,
+                height: size,
+                depth_or_array_layers: 1,
+            },
+            TextureDimension::D2,
+            pixel_data,
+            TextureFormat::Rgba8UnormSrgb,
+            Default::default(),
+        );
+
+        images.add(image)
+    }
+
+    // Create colored sprites for each equipment type
     sprites.insert(
         EquipmentType::Sampler,
-        asset_server.load(EquipmentType::Sampler.sprite_path()),
+        create_colored_sprite(&mut images, [100, 200, 255, 255]), // Light blue
     );
     sprites.insert(
         EquipmentType::SurfaceMining,
-        asset_server.load(EquipmentType::SurfaceMining.sprite_path()),
+        create_colored_sprite(&mut images, [255, 200, 100, 255]), // Orange
     );
     sprites.insert(
         EquipmentType::DeepMining,
-        asset_server.load(EquipmentType::DeepMining.sprite_path()),
+        create_colored_sprite(&mut images, [200, 100, 255, 255]), // Purple
     );
     sprites.insert(
         EquipmentType::Refining,
-        asset_server.load(EquipmentType::Refining.sprite_path()),
+        create_colored_sprite(&mut images, [255, 100, 100, 255]), // Red
     );
     sprites.insert(
         EquipmentType::Transport,
-        asset_server.load(EquipmentType::Transport.sprite_path()),
+        create_colored_sprite(&mut images, [100, 255, 100, 255]), // Green
     );
+
+    println!("Equipment sprites generated");
 
     commands.insert_resource(EquipmentSprites { sprites });
 }
@@ -670,6 +735,9 @@ fn spawn_equipment_sprites(
                         )
                     });
 
+                    println!("Spawning equipment sprite: id={}, type={:?}, pos={:?}",
+                        node.id, equipment_type, position);
+
                     commands.spawn((
                         Sprite::from_image(sprite_handle.clone()),
                         Transform::from_translation(position.extend(1.0)),
@@ -677,6 +745,8 @@ fn spawn_equipment_sprites(
                             equipment_id: node.id,
                         },
                     ));
+                } else {
+                    println!("No sprite handle found for equipment type: {:?}", equipment_type);
                 }
             }
         }
@@ -714,14 +784,17 @@ fn click_select_equipment(
     equipment_query: Query<(&Transform, &EquipmentSprite)>,
     mut selected: ResMut<SelectedEquipment>,
     mut equipment_state: ResMut<EquipmentTreeState>,
+    mut equipment_actions: ResMut<EquipmentTreeActions>,
     mut contexts: bevy_egui::EguiContexts,
 ) {
-    // Don't process clicks if hovering over UI
-    if contexts.ctx_mut().is_pointer_over_area() {
-        return;
-    }
-
     if mouse_button.just_pressed(MouseButton::Left) {
+        let over_ui = contexts.ctx_mut().is_pointer_over_area();
+        println!("Left click detected, over UI: {}", over_ui);
+
+        // Don't process clicks if hovering over UI
+        if over_ui {
+            return;
+        }
         let Ok(window) = windows.single() else {
             return;
         };
@@ -738,25 +811,40 @@ fn click_select_equipment(
         let Ok(world_position) = camera
             .viewport_to_world_2d(camera_transform, cursor_position)
         else {
+            println!("Failed to convert cursor to world position");
             return;
         };
 
+        println!("Cursor screen: {:?}, world: {:?}", cursor_position, world_position);
+
         // Check if we clicked on any equipment
         let mut clicked_id: Option<usize> = None;
-        let sprite_size = 32.0; // Equipment sprite size
+        let sprite_size = 64.0; // Equipment sprite click radius (increased for easier clicking)
 
+        println!("Checking {} equipment sprites", equipment_query.iter().count());
         for (transform, equipment_sprite) in &equipment_query {
             let sprite_pos = transform.translation.truncate();
             let distance = world_position.distance(sprite_pos);
 
+            println!("  Equipment {} at {:?}, distance: {}",
+                equipment_sprite.equipment_id, sprite_pos, distance);
+
             if distance < sprite_size {
                 clicked_id = Some(equipment_sprite.equipment_id);
+                println!("  -> HIT! Clicked on equipment: {}", equipment_sprite.equipment_id);
                 break;
             }
         }
 
-        // Update selection
+        // Update selection in both resources
         selected.selected_id = clicked_id;
+
+        // Clear previous selection and set new one in equipment_actions
+        equipment_actions.selected.clear();
+        if let Some(id) = clicked_id {
+            equipment_actions.selected.insert(id);
+            println!("Selected equipment: {}", id);
+        }
 
         // Activate/deactivate equipment - helper function to recursively update
         fn update_active_state(node: &mut EquipmentTreeNode, active_id: usize) {
@@ -976,12 +1064,8 @@ fn ui_system(
         });
     });
 
-    // Central panel is behind the game view
-    egui::CentralPanel::default()
-        .frame(egui::Frame::NONE)
-        .show(ctx, |_ui| {
-            // Game renders here
-        });
+    // No central panel needed - game renders in the background
+    // This allows clicks to reach the game without being intercepted by egui
 }
 
 // Helper methods for EquipmentTreeNode to support drag-drop
@@ -1052,5 +1136,104 @@ impl EquipmentTreeNode {
         }
 
         false
+    }
+}
+
+// System to manage selection outlines for selected equipment
+fn update_selection_outlines(
+    mut commands: Commands,
+    selected: Res<SelectedEquipment>,
+    equipment_query: Query<(&Transform, &EquipmentSprite), Without<SelectionOutline>>,
+    mut outline_query: Query<(Entity, &mut Transform, &SelectionOutline), Without<EquipmentSprite>>,
+    mut images: ResMut<Assets<Image>>,
+) {
+    // Get the currently selected equipment ID
+    let selected_id = selected.selected_id;
+
+    // Find all existing outlines and check if they should exist
+    let mut outlines_to_remove = Vec::new();
+    for (entity, _transform, outline) in outline_query.iter() {
+        if Some(outline.equipment_id) != selected_id {
+            outlines_to_remove.push(entity);
+        }
+    }
+
+    // Remove outlines that shouldn't exist
+    for entity in outlines_to_remove {
+        commands.entity(entity).despawn();
+    }
+
+    // If we have a selection, make sure it has an outline
+    if let Some(id) = selected_id {
+        println!("Selected ID: {}, creating outline if needed", id);
+
+        // Check if an outline already exists for this equipment
+        let outline_exists = outline_query
+            .iter()
+            .any(|(_, _, outline)| outline.equipment_id == id);
+
+        if !outline_exists {
+            println!("No outline exists, searching for equipment sprite with id {}", id);
+            // Find the equipment sprite to get its position
+            for (transform, equipment_sprite) in equipment_query.iter() {
+                if equipment_sprite.equipment_id == id {
+                    println!("Found equipment sprite at position: {:?}", transform.translation);
+                    // Create a green outline sprite
+                    let outline_size = 40;
+                    let inner_size = 34; // Inner transparent area
+                    let border_thickness = (outline_size - inner_size) / 2;
+
+                    // Create pixel data for the outline
+                    let mut pixel_data = Vec::new();
+                    for y in 0..outline_size {
+                        for x in 0..outline_size {
+                            // Check if this pixel is in the border area
+                            if x < border_thickness || x >= outline_size - border_thickness ||
+                               y < border_thickness || y >= outline_size - border_thickness {
+                                // Green border
+                                pixel_data.extend_from_slice(&[0, 255, 0, 255]);
+                            } else {
+                                // Transparent center
+                                pixel_data.extend_from_slice(&[0, 0, 0, 0]);
+                            }
+                        }
+                    }
+
+                    let outline_image = Image::new(
+                        Extent3d {
+                            width: outline_size as u32,
+                            height: outline_size as u32,
+                            depth_or_array_layers: 1,
+                        },
+                        TextureDimension::D2,
+                        pixel_data,
+                        TextureFormat::Rgba8UnormSrgb,
+                        Default::default(),
+                    );
+
+                    let outline_handle = images.add(outline_image);
+
+                    // Spawn the outline sprite behind the equipment sprite
+                    commands.spawn((
+                        Sprite::from_image(outline_handle),
+                        Transform::from_translation(transform.translation - Vec3::new(0.0, 0.0, 0.5)),
+                        SelectionOutline {
+                            equipment_id: id,
+                        },
+                    ));
+
+                    break;
+                }
+            }
+        }
+    }
+
+    // Update outline positions to follow their equipment sprites
+    for (equipment_transform, equipment_sprite) in equipment_query.iter() {
+        for (_, mut outline_transform, outline) in outline_query.iter_mut() {
+            if outline.equipment_id == equipment_sprite.equipment_id {
+                outline_transform.translation = equipment_transform.translation - Vec3::new(0.0, 0.0, 0.5);
+            }
+        }
     }
 }
