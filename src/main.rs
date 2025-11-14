@@ -2,8 +2,10 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::window::PrimaryWindow;
 use bevy_egui::{egui, EguiContexts, EguiPlugin};
+use egui_arbor::{ActionIcon, DropPosition, IconType, Outliner, OutlinerActions, OutlinerNode, tree_ops::TreeOperations};
 use noise::{NoiseFn, Perlin, Fbm};
 use rand::{thread_rng, Rng};
+use std::collections::HashSet;
 
 const MAP_WIDTH: usize = 512;
 const MAP_HEIGHT: usize = 512;
@@ -23,6 +25,7 @@ fn main() {
         })
         .init_resource::<MineralMap>()
         .init_resource::<EquipmentTreeState>()
+        .init_resource::<EquipmentTreeActions>()
         .init_resource::<SelectedEquipment>()
         .add_systems(Startup, (setup, load_equipment_sprites))
         .add_systems(Update, (
@@ -218,81 +221,288 @@ impl EquipmentType {
     }
 }
 
-// Equipment instance
-#[derive(Debug, Clone)]
-struct Equipment {
-    id: usize,
-    equipment_type: EquipmentType,
-    position: Option<Vec2>,
-    active: bool,
-}
-
 // Tree node for equipment hierarchy
 #[derive(Debug, Clone)]
-struct EquipmentNode {
-    equipment: Equipment,
-    children: Vec<EquipmentNode>,
+struct EquipmentTreeNode {
+    id: usize,
+    name: String,
+    node_type: NodeType,
+    position: Option<Vec2>,
+    active: bool,
+    children: Vec<EquipmentTreeNode>,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum NodeType {
+    Container,
+    Equipment(EquipmentType),
+}
+
+impl EquipmentTreeNode {
+    fn container(id: usize, name: impl Into<String>) -> Self {
+        Self {
+            id,
+            name: name.into(),
+            node_type: NodeType::Container,
+            position: None,
+            active: false,
+            children: Vec::new(),
+        }
+    }
+
+    fn equipment(id: usize, name: impl Into<String>, equipment_type: EquipmentType) -> Self {
+        Self {
+            id,
+            name: name.into(),
+            node_type: NodeType::Equipment(equipment_type),
+            position: None,
+            active: false,
+            children: Vec::new(),
+        }
+    }
+
+    fn is_container(&self) -> bool {
+        matches!(self.node_type, NodeType::Container)
+    }
+
+    fn equipment_type(&self) -> Option<EquipmentType> {
+        match self.node_type {
+            NodeType::Equipment(eq_type) => Some(eq_type),
+            _ => None,
+        }
+    }
+
+    /// Recursively find and rename a node by ID
+    fn rename_node(&mut self, id: usize, new_name: String) -> bool {
+        if self.id == id {
+            self.name = new_name;
+            return true;
+        }
+
+        for child in &mut self.children {
+            if child.rename_node(id, new_name.clone()) {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Recursively find a node by ID and return a reference
+    fn find_node(&self, id: usize) -> Option<&EquipmentTreeNode> {
+        if self.id == id {
+            return Some(self);
+        }
+
+        for child in &self.children {
+            if let Some(node) = child.find_node(id) {
+                return Some(node);
+            }
+        }
+
+        None
+    }
+
+    /// Recursively find a mutable node by ID
+    fn find_node_mut(&mut self, id: usize) -> Option<&mut EquipmentTreeNode> {
+        if self.id == id {
+            return Some(self);
+        }
+
+        for child in &mut self.children {
+            if let Some(node) = child.find_node_mut(id) {
+                return Some(node);
+            }
+        }
+
+        None
+    }
+}
+
+// Implement OutlinerNode for the tree
+impl OutlinerNode for EquipmentTreeNode {
+    type Id = usize;
+
+    fn id(&self) -> Self::Id {
+        self.id
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn is_collection(&self) -> bool {
+        self.is_container()
+    }
+
+    fn children(&self) -> &[Self] {
+        &self.children
+    }
+
+    fn children_mut(&mut self) -> &mut Vec<Self> {
+        &mut self.children
+    }
+
+    fn icon(&self) -> Option<IconType> {
+        if self.is_container() {
+            Some(IconType::Collection)
+        } else {
+            Some(IconType::Entity)
+        }
+    }
+
+    fn action_icons(&self) -> Vec<ActionIcon> {
+        vec![ActionIcon::Visibility, ActionIcon::Selection]
+    }
+}
+
+// Implement TreeOperations for drag-drop functionality
+impl TreeOperations for EquipmentTreeNode {}
 
 // Resource to manage equipment tree state
 #[derive(Resource)]
 struct EquipmentTreeState {
-    equipment_categories: Vec<(EquipmentType, Vec<Equipment>)>,
+    nodes: Vec<EquipmentTreeNode>,
     next_id: usize,
-    expanded_categories: Vec<EquipmentType>,
 }
 
 impl Default for EquipmentTreeState {
     fn default() -> Self {
-        let categories = vec![
-            (EquipmentType::Sampler, vec![]),
-            (EquipmentType::SurfaceMining, vec![]),
-            (EquipmentType::DeepMining, vec![]),
-            (EquipmentType::Refining, vec![]),
-            (EquipmentType::Transport, vec![]),
+        let mut next_id = 0;
+
+        // Create initial container nodes for each equipment type
+        let nodes = vec![
+            {
+                let container = EquipmentTreeNode::container(next_id, "Samplers");
+                next_id += 1;
+                container
+            },
+            {
+                let container = EquipmentTreeNode::container(next_id, "Surface Mining");
+                next_id += 1;
+                container
+            },
+            {
+                let container = EquipmentTreeNode::container(next_id, "Deep Mining");
+                next_id += 1;
+                container
+            },
+            {
+                let container = EquipmentTreeNode::container(next_id, "Refining");
+                next_id += 1;
+                container
+            },
+            {
+                let container = EquipmentTreeNode::container(next_id, "Transport");
+                next_id += 1;
+                container
+            },
         ];
 
         Self {
-            equipment_categories: categories,
-            next_id: 0,
-            expanded_categories: vec![],
+            nodes,
+            next_id,
         }
     }
 }
 
 impl EquipmentTreeState {
-    fn add_equipment(&mut self, equipment_type: EquipmentType) -> usize {
+    fn add_container(&mut self, name: String) {
+        let container = EquipmentTreeNode::container(self.next_id, name);
+        self.next_id += 1;
+        self.nodes.push(container);
+    }
+
+    fn add_equipment(&mut self, name: String, equipment_type: EquipmentType) -> usize {
         let id = self.next_id;
         self.next_id += 1;
 
-        let equipment = Equipment {
-            id,
-            equipment_type,
-            position: None,
-            active: false,
-        };
-
-        for (cat_type, equipments) in &mut self.equipment_categories {
-            if *cat_type == equipment_type {
-                equipments.push(equipment);
-                break;
-            }
-        }
+        let equipment = EquipmentTreeNode::equipment(id, name, equipment_type);
+        self.nodes.push(equipment);
 
         id
     }
 
-    fn is_expanded(&self, equipment_type: EquipmentType) -> bool {
-        self.expanded_categories.contains(&equipment_type)
+    fn find_node(&self, id: usize) -> Option<&EquipmentTreeNode> {
+        for node in &self.nodes {
+            if let Some(found) = node.find_node(id) {
+                return Some(found);
+            }
+        }
+        None
     }
 
-    fn toggle_expanded(&mut self, equipment_type: EquipmentType) {
-        if let Some(pos) = self.expanded_categories.iter().position(|&t| t == equipment_type) {
-            self.expanded_categories.remove(pos);
-        } else {
-            self.expanded_categories.push(equipment_type);
+    fn find_node_mut(&mut self, id: usize) -> Option<&mut EquipmentTreeNode> {
+        for node in &mut self.nodes {
+            if let Some(found) = node.find_node_mut(id) {
+                return Some(found);
+            }
+        }
+        None
+    }
+}
+
+// Actions handler for the outliner
+#[derive(Resource, Default)]
+struct EquipmentTreeActions {
+    selected: HashSet<usize>,
+    visible: HashSet<usize>,
+}
+
+impl EquipmentTreeActions {
+    fn new() -> Self {
+        Self {
+            selected: HashSet::new(),
+            visible: HashSet::new(),
         }
     }
+}
+
+impl OutlinerActions<EquipmentTreeNode> for EquipmentTreeActions {
+    fn on_rename(&mut self, _id: &usize, _new_name: String) {
+        // Renaming is handled in the ui_system
+    }
+
+    fn on_move(&mut self, _id: &usize, _target: &usize, _position: DropPosition) {
+        // Moving is handled in the ui_system
+    }
+
+    fn on_select(&mut self, id: &usize, selected: bool) {
+        if selected {
+            self.selected.insert(*id);
+        } else {
+            self.selected.remove(id);
+        }
+    }
+
+    fn is_selected(&self, id: &usize) -> bool {
+        self.selected.contains(id)
+    }
+
+    fn is_visible(&self, id: &usize) -> bool {
+        !self.visible.contains(id) // Using "visible" set as "hidden" set - inverted logic
+    }
+
+    fn is_locked(&self, _id: &usize) -> bool {
+        false
+    }
+
+    fn on_visibility_toggle(&mut self, id: &usize) {
+        if self.visible.contains(id) {
+            self.visible.remove(id);
+        } else {
+            self.visible.insert(*id);
+        }
+    }
+
+    fn on_lock_toggle(&mut self, _id: &usize) {}
+
+    fn on_selection_toggle(&mut self, id: &usize) {
+        let is_selected = self.is_selected(id);
+        self.on_select(id, !is_selected);
+    }
+
+    fn on_custom_action(&mut self, _id: &usize, _icon: &str) {}
 }
 
 // Resource to store equipment sprites
@@ -439,13 +649,19 @@ fn spawn_equipment_sprites(
         .map(|sprite| sprite.equipment_id)
         .collect();
 
-    // Spawn sprites for equipment that doesn't have one
-    for (equipment_type, equipments) in &equipment_state.equipment_categories {
-        for equipment in equipments {
-            if !existing_ids.contains(&equipment.id) {
+    // Helper function to recursively spawn sprites
+    fn spawn_for_node(
+        node: &EquipmentTreeNode,
+        existing_ids: &std::collections::HashSet<usize>,
+        equipment_sprites: &EquipmentSprites,
+        commands: &mut Commands,
+    ) {
+        // If this is an equipment node (not a container)
+        if let Some(equipment_type) = node.equipment_type() {
+            if !existing_ids.contains(&node.id) {
                 // Equipment needs a sprite
-                if let Some(sprite_handle) = equipment_sprites.sprites.get(equipment_type) {
-                    let position = equipment.position.unwrap_or_else(|| {
+                if let Some(sprite_handle) = equipment_sprites.sprites.get(&equipment_type) {
+                    let position = node.position.unwrap_or_else(|| {
                         // Random position on map if not set
                         let mut rng = thread_rng();
                         Vec2::new(
@@ -458,12 +674,22 @@ fn spawn_equipment_sprites(
                         Sprite::from_image(sprite_handle.clone()),
                         Transform::from_translation(position.extend(1.0)),
                         EquipmentSprite {
-                            equipment_id: equipment.id,
+                            equipment_id: node.id,
                         },
                     ));
                 }
             }
         }
+
+        // Recursively spawn for children
+        for child in &node.children {
+            spawn_for_node(child, existing_ids, equipment_sprites, commands);
+        }
+    }
+
+    // Spawn sprites for all equipment nodes in the tree
+    for node in &equipment_state.nodes {
+        spawn_for_node(node, &existing_ids, &equipment_sprites, &mut commands);
     }
 }
 
@@ -473,14 +699,9 @@ fn update_equipment_positions(
     sprite_query: Query<(&Transform, &EquipmentSprite), Changed<Transform>>,
 ) {
     for (transform, equipment_sprite) in &sprite_query {
-        // Find the equipment and update its position
-        for (_equipment_type, equipments) in &mut equipment_state.equipment_categories {
-            for equipment in equipments {
-                if equipment.id == equipment_sprite.equipment_id {
-                    equipment.position = Some(transform.translation.truncate());
-                    break;
-                }
-            }
+        // Find the equipment node and update its position
+        if let Some(node) = equipment_state.find_node_mut(equipment_sprite.equipment_id) {
+            node.position = Some(transform.translation.truncate());
         }
     }
 }
@@ -537,12 +758,17 @@ fn click_select_equipment(
         // Update selection
         selected.selected_id = clicked_id;
 
-        // Activate/deactivate equipment
+        // Activate/deactivate equipment - helper function to recursively update
+        fn update_active_state(node: &mut EquipmentTreeNode, active_id: usize) {
+            node.active = node.id == active_id;
+            for child in &mut node.children {
+                update_active_state(child, active_id);
+            }
+        }
+
         if let Some(id) = clicked_id {
-            for (_equipment_type, equipments) in &mut equipment_state.equipment_categories {
-                for equipment in equipments {
-                    equipment.active = equipment.id == id;
-                }
+            for node in &mut equipment_state.nodes {
+                update_active_state(node, id);
             }
         }
     }
@@ -584,6 +810,7 @@ fn move_selected_equipment(
 fn ui_system(
     mut contexts: EguiContexts,
     mut equipment_state: ResMut<EquipmentTreeState>,
+    mut equipment_actions: ResMut<EquipmentTreeActions>,
     selected: Res<SelectedEquipment>,
 ) {
     let ctx = contexts.ctx_mut();
@@ -624,78 +851,129 @@ fn ui_system(
         ui.colored_label(egui::Color32::from_rgb(51, 51, 51), "■ Coal");
     });
 
-    // Right panel - Equipment Tree
-    egui::SidePanel::right("right_panel").min_width(250.0).show(ctx, |ui| {
+    // Right panel - Equipment Tree with Outliner
+    egui::SidePanel::right("right_panel").min_width(300.0).show(ctx, |ui| {
         ui.heading("Mining Equipment");
         ui.separator();
 
-        // Collect actions to avoid borrowing issues
-        let mut toggle_type: Option<EquipmentType> = None;
-        let mut add_type: Option<EquipmentType> = None;
+        ui.label("Drag to reorganize | Double-click to rename");
+        ui.add_space(4.0);
 
+        // Action buttons at the top
+        ui.horizontal(|ui| {
+            if ui.button("+ New Container").clicked() {
+                let id = equipment_state.next_id;
+                equipment_state.add_container(format!("Container {}", id));
+            }
+
+            ui.menu_button("+ New Equipment", |ui| {
+                if ui.button("Sampler").clicked() {
+                    let id = equipment_state.next_id;
+                    equipment_state.add_equipment(
+                        format!("Sampler {}", id),
+                        EquipmentType::Sampler
+                    );
+                    ui.close_menu();
+                }
+                if ui.button("Surface Mining").clicked() {
+                    let id = equipment_state.next_id;
+                    equipment_state.add_equipment(
+                        format!("Surface Miner {}", id),
+                        EquipmentType::SurfaceMining
+                    );
+                    ui.close_menu();
+                }
+                if ui.button("Deep Mining").clicked() {
+                    let id = equipment_state.next_id;
+                    equipment_state.add_equipment(
+                        format!("Deep Miner {}", id),
+                        EquipmentType::DeepMining
+                    );
+                    ui.close_menu();
+                }
+                if ui.button("Refining").clicked() {
+                    let id = equipment_state.next_id;
+                    equipment_state.add_equipment(
+                        format!("Refinery {}", id),
+                        EquipmentType::Refining
+                    );
+                    ui.close_menu();
+                }
+                if ui.button("Transport").clicked() {
+                    let id = equipment_state.next_id;
+                    equipment_state.add_equipment(
+                        format!("Transport {}", id),
+                        EquipmentType::Transport
+                    );
+                    ui.close_menu();
+                }
+            });
+        });
+
+        ui.separator();
+
+        // Show the outliner with the tree
         egui::ScrollArea::vertical().show(ui, |ui| {
-            let categories = equipment_state.equipment_categories.clone();
+            let response = Outliner::new("equipment_outliner")
+                .show(ui, &equipment_state.nodes, &mut *equipment_actions);
 
-            for (equipment_type, equipments) in &categories {
-                let is_expanded = equipment_state.is_expanded(*equipment_type);
-
-                // Category header with expand/collapse button
-                ui.horizontal(|ui| {
-                    let icon = if is_expanded { "▼" } else { "▶" };
-                    if ui.button(icon).clicked() {
-                        toggle_type = Some(*equipment_type);
+            // Handle rename events
+            if let Some((node_id, new_name)) = response.renamed() {
+                for root in &mut equipment_state.nodes {
+                    if root.rename_node(*node_id, new_name.to_string()) {
+                        break;
                     }
-                    ui.label(equipment_type.name());
-                });
+                }
+            }
 
-                // Show equipment instances when expanded
-                if is_expanded {
-                    ui.indent(equipment_type.name(), |ui| {
-                        // Show description
-                        ui.label(egui::RichText::new(equipment_type.description())
-                            .size(10.0)
-                            .italics()
-                            .color(egui::Color32::GRAY));
+            // Handle drag-drop events
+            if let Some(drop_event) = response.drop_event() {
+                let target_id = &drop_event.target;
+                let position = drop_event.position;
 
-                        ui.separator();
+                // Get all nodes being dragged
+                let dragging_ids = response.dragging_nodes();
 
-                        // List all equipment instances
-                        if equipments.is_empty() {
-                            ui.label(egui::RichText::new("No equipment deployed")
-                                .size(10.0)
-                                .color(egui::Color32::DARK_GRAY));
+                if !dragging_ids.is_empty() {
+                    // Use TreeOperations to handle the move
+                    for drag_id in dragging_ids {
+                        // Find and remove the dragged node
+                        let mut removed_node = None;
+
+                        // Try to remove from root level
+                        if let Some(idx) = equipment_state.nodes.iter().position(|n| n.id == *drag_id) {
+                            removed_node = Some(equipment_state.nodes.remove(idx));
                         } else {
-                            for equipment in equipments {
-                                ui.horizontal(|ui| {
-                                    let status = if equipment.active { "🟢" } else { "⚪" };
-                                    ui.label(format!("{} Unit #{}", status, equipment.id));
-                                    if let Some(pos) = equipment.position {
-                                        ui.label(format!("({:.0}, {:.0})", pos.x, pos.y));
-                                    }
-                                });
+                            // Search recursively in children
+                            for root in &mut equipment_state.nodes {
+                                if let Some(node) = EquipmentTreeNode::remove_node(root, *drag_id) {
+                                    removed_node = Some(node);
+                                    break;
+                                }
                             }
                         }
 
-                        ui.separator();
+                        // Insert the node at the new position
+                        if let Some(node) = removed_node {
+                            let mut inserted = false;
 
-                        // Add new equipment button
-                        if ui.button(format!("+ Add {}", equipment_type.name())).clicked() {
-                            add_type = Some(*equipment_type);
+                            // Try to insert relative to target
+                            for root in &mut equipment_state.nodes {
+                                if EquipmentTreeNode::insert_node(root, *target_id, node.clone(), position) {
+                                    inserted = true;
+                                    break;
+                                }
+                            }
+
+                            // If not inserted, add back to root level
+                            if !inserted {
+                                equipment_state.nodes.push(node);
+                            }
                         }
-                    });
+                    }
                 }
-
-                ui.add_space(5.0);
             }
         });
-
-        // Apply actions after rendering
-        if let Some(eq_type) = toggle_type {
-            equipment_state.toggle_expanded(eq_type);
-        }
-        if let Some(eq_type) = add_type {
-            equipment_state.add_equipment(eq_type);
-        }
     });
 
     // Central panel is behind the game view
@@ -704,4 +982,75 @@ fn ui_system(
         .show(ctx, |_ui| {
             // Game renders here
         });
+}
+
+// Helper methods for EquipmentTreeNode to support drag-drop
+impl EquipmentTreeNode {
+    fn remove_node(parent: &mut EquipmentTreeNode, id: usize) -> Option<EquipmentTreeNode> {
+        // Check direct children
+        if let Some(idx) = parent.children.iter().position(|n| n.id == id) {
+            return Some(parent.children.remove(idx));
+        }
+
+        // Search recursively
+        for child in &mut parent.children {
+            if let Some(node) = Self::remove_node(child, id) {
+                return Some(node);
+            }
+        }
+
+        None
+    }
+
+    fn insert_node(
+        parent: &mut EquipmentTreeNode,
+        target_id: usize,
+        node: EquipmentTreeNode,
+        position: DropPosition,
+    ) -> bool {
+        // If this is the target
+        if parent.id == target_id {
+            match position {
+                DropPosition::Inside => {
+                    if parent.is_container() {
+                        parent.children.push(node);
+                        return true;
+                    }
+                }
+                _ => {
+                    // Can't insert before/after root
+                    return false;
+                }
+            }
+        }
+
+        // Check if target is in direct children
+        if let Some(idx) = parent.children.iter().position(|n| n.id == target_id) {
+            match position {
+                DropPosition::Before => {
+                    parent.children.insert(idx, node);
+                    return true;
+                }
+                DropPosition::After => {
+                    parent.children.insert(idx + 1, node);
+                    return true;
+                }
+                DropPosition::Inside => {
+                    if parent.children[idx].is_container() {
+                        parent.children[idx].children.push(node);
+                        return true;
+                    }
+                }
+            }
+        }
+
+        // Search recursively
+        for child in &mut parent.children {
+            if Self::insert_node(child, target_id, node.clone(), position) {
+                return true;
+            }
+        }
+
+        false
+    }
 }

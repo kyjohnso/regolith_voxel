@@ -2171,6 +2171,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui-arbor"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ffd636a9bfcca2628d05f47690bb3627851667e4db7126a4ae48208653dd7248"
+dependencies = [
+ "egui 0.31.1",
+]
+
+[[package]]
 name = "egui_tiles"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4480,6 +4489,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "bevy_egui",
+ "egui-arbor",
  "egui_tiles",
  "noise",
  "rand",
