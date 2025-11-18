@@ -9,6 +9,16 @@ use std::collections::HashSet;
 
 const MAP_WIDTH: usize = 512;
 const MAP_HEIGHT: usize = 512;
+const CA_TICK_RATE: f32 = 1.0 / 30.0; // 30 updates per second
+
+// Physics types for cellular automata
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum PhysicsType {
+    Empty,      // Void/air - materials can move into this
+    Solid,      // Structural - doesn't move
+    Granular,   // Falls like sand when unsupported
+    Flowing,    // Flows like liquid
+}
 
 fn main() {
     App::new()
@@ -27,6 +37,7 @@ fn main() {
         .init_resource::<EquipmentTreeState>()
         .init_resource::<EquipmentTreeActions>()
         .init_resource::<SelectedEquipment>()
+        .init_resource::<CellularAutomataTimer>()
         .add_systems(Startup, (setup, load_equipment_sprites))
         .add_systems(Update, (
             ui_system,
@@ -36,6 +47,9 @@ fn main() {
             move_selected_equipment,
             update_equipment_positions,
             update_selection_outlines,
+            equipment_mining_system,
+            cellular_automata_system,
+            update_mineral_map_texture,
         ))
         .run();
 }
@@ -64,6 +78,15 @@ impl MineralType {
             MineralType::Uranium => Color::srgb(0.2, 0.8, 0.2),
             MineralType::Diamond => Color::srgb(0.4, 0.8, 1.0),
             MineralType::Coal => Color::srgb(0.2, 0.2, 0.2),
+        }
+    }
+
+    fn physics_type(&self) -> PhysicsType {
+        match self {
+            MineralType::Empty => PhysicsType::Empty,
+            MineralType::Diamond | MineralType::Uranium => PhysicsType::Solid,
+            MineralType::Coal | MineralType::Iron | MineralType::Copper => PhysicsType::Granular,
+            MineralType::Gold | MineralType::Silver => PhysicsType::Flowing,
         }
     }
 
@@ -111,6 +134,7 @@ struct MineralMap {
     width: usize,
     height: usize,
     data: Vec<MineralCell>,
+    heightmap: Vec<f32>, // Invisible heightmap for flow simulation
 }
 
 impl Default for MineralMap {
@@ -127,8 +151,10 @@ impl MineralMap {
         // Create noise generators
         let perlin = Perlin::new(seed);
         let fbm = Fbm::<Perlin>::new(seed);
+        let height_noise = Perlin::new(seed.wrapping_add(1000));
 
         let mut data = Vec::with_capacity(MAP_WIDTH * MAP_HEIGHT);
+        let mut heightmap = Vec::with_capacity(MAP_WIDTH * MAP_HEIGHT);
 
         for y in 0..MAP_HEIGHT {
             for x in 0..MAP_WIDTH {
@@ -149,6 +175,14 @@ impl MineralMap {
                     sampled: false,
                     mined: false,
                 });
+
+                // Generate heightmap using different noise
+                // Height increases with depth (y) + some variation
+                let height_scale = 0.03;
+                let height_variation = height_noise.get([x as f64 * height_scale, y as f64 * height_scale]);
+                let base_height = y as f32; // Deeper = higher base height
+                let height = base_height + (height_variation as f32 * 50.0); // Add variation
+                heightmap.push(height);
             }
         }
 
@@ -156,6 +190,7 @@ impl MineralMap {
             width: MAP_WIDTH,
             height: MAP_HEIGHT,
             data,
+            heightmap,
         }
     }
 
@@ -548,6 +583,20 @@ struct SelectedEquipment {
     selected_id: Option<usize>,
 }
 
+// Timer resource for cellular automata updates
+#[derive(Resource)]
+struct CellularAutomataTimer {
+    timer: Timer,
+}
+
+impl Default for CellularAutomataTimer {
+    fn default() -> Self {
+        Self {
+            timer: Timer::from_seconds(CA_TICK_RATE, TimerMode::Repeating),
+        }
+    }
+}
+
 fn setup(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
@@ -890,7 +939,7 @@ fn ui_system(
         ui.horizontal(|ui| {
             ui.label("Regolith Voxel - Mining Operations");
             ui.separator();
-            ui.label("WASD: Pan | Q/E: Zoom | Click: Select | Arrows: Move");
+            ui.label("WASD: Pan | Q/E: Zoom | Click: Select | Arrows: Move | M: Mine");
 
             if let Some(selected_id) = selected.selected_id {
                 ui.separator();
@@ -1212,6 +1261,235 @@ fn update_selection_outlines(
             if outline.equipment_id == equipment_sprite.equipment_id {
                 outline_transform.translation = equipment_transform.translation - Vec3::new(0.0, 0.0, 0.5);
             }
+        }
+    }
+}
+
+// System for equipment to mine nearby cells
+fn equipment_mining_system(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    equipment_state: Res<EquipmentTreeState>,
+    sprite_query: Query<(&Transform, &EquipmentSprite)>,
+    mut mineral_map: ResMut<MineralMap>,
+) {
+    // Press M to mine with active equipment
+    if !keyboard.just_pressed(KeyCode::KeyM) {
+        return;
+    }
+
+    println!("M key pressed - checking for mining equipment...");
+
+    // Find all active mining equipment
+    for (transform, equipment_sprite) in sprite_query.iter() {
+        if let Some(node) = equipment_state.find_node(equipment_sprite.equipment_id) {
+            // Check if this is mining equipment
+            let can_mine = matches!(
+                node.equipment_type(),
+                Some(EquipmentType::SurfaceMining) | Some(EquipmentType::DeepMining)
+            );
+
+            if !can_mine {
+                continue;
+            }
+
+            // Get equipment position in world space
+            let world_pos = transform.translation.truncate();
+
+            println!("Mining with equipment {} at world pos: {:?}", node.name, world_pos);
+
+            // Convert to map coordinates (accounting for 2x scale of map sprite)
+            // Map is centered at (0, 0) in world space
+            // Flip Y because image coordinates go down but world coordinates go up
+            let map_x = ((world_pos.x / 2.0) + (MAP_WIDTH as f32 / 2.0)) as i32;
+            let map_y = ((MAP_HEIGHT as f32 / 2.0) - (world_pos.y / 2.0)) as i32;
+
+            println!("Map coordinates: x={}, y={}", map_x, map_y);
+
+            // Mining radius (clear a 5x5 area)
+            let mining_radius = 10;
+
+            for dy in -mining_radius..=mining_radius {
+                for dx in -mining_radius..=mining_radius {
+                    let x = map_x + dx;
+                    let y = map_y + dy;
+
+                    if x >= 0 && x < MAP_WIDTH as i32 && y >= 0 && y < MAP_HEIGHT as i32 {
+                        if let Some(cell) = mineral_map.get_mut(x as usize, y as usize) {
+                            // Mine the cell (set to empty)
+                            cell.mineral_type = MineralType::Empty;
+                            cell.mined = true;
+                            cell.density = 0.0;
+
+                            // Update heightmap - reduce height when material is removed
+                            let idx = y as usize * MAP_WIDTH + x as usize;
+                            mineral_map.heightmap[idx] *= 0.9;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Cellular automata system - updates mineral cells based on physics rules
+fn cellular_automata_system(
+    time: Res<Time>,
+    mut timer: ResMut<CellularAutomataTimer>,
+    mut mineral_map: ResMut<MineralMap>,
+) {
+    // Only update at the configured tick rate
+    timer.timer.tick(time.delta());
+    if !timer.timer.just_finished() {
+        return;
+    }
+
+    let width = mineral_map.width;
+    let height = mineral_map.height;
+
+    // Create a copy of the data to read from (avoid borrowing issues)
+    let mut next_data = mineral_map.data.clone();
+    let mut next_heightmap = mineral_map.heightmap.clone();
+
+    let mut rng = thread_rng();
+
+    // Process from bottom to top, left to right for falling behavior
+    for y in (0..height).rev() {
+        for x in 0..width {
+            let idx = y * width + x;
+            let cell = &mineral_map.data[idx];
+            let physics = cell.mineral_type.physics_type();
+
+            if physics == PhysicsType::Empty || physics == PhysicsType::Solid {
+                continue; // Nothing to do for empty or solid cells
+            }
+
+            let current_height = mineral_map.heightmap[idx];
+
+            // Check neighbors and find the lowest height to flow into
+            let mut best_move: Option<(usize, usize, f32)> = None; // (nx, ny, height)
+
+            // Helper to check if a position is valid and empty
+            let can_move_to = |nx: usize, ny: usize| -> bool {
+                if nx >= width || ny >= height {
+                    return false;
+                }
+                let target_idx = ny * width + nx;
+                mineral_map.data[target_idx].mineral_type.physics_type() == PhysicsType::Empty
+            };
+
+            // GRANULAR PHYSICS (coal, iron, copper) - fall like sand
+            if physics == PhysicsType::Granular {
+                // Try to fall straight down
+                if y > 0 && can_move_to(x, y - 1) {
+                    let target_height = mineral_map.heightmap[(y - 1) * width + x];
+                    best_move = Some((x, y - 1, target_height));
+                }
+                // Try diagonally down-left
+                else if y > 0 && x > 0 && can_move_to(x - 1, y - 1) && rng.gen_bool(0.5) {
+                    let target_height = mineral_map.heightmap[(y - 1) * width + (x - 1)];
+                    best_move = Some((x - 1, y - 1, target_height));
+                }
+                // Try diagonally down-right
+                else if y > 0 && x < width - 1 && can_move_to(x + 1, y - 1) && rng.gen_bool(0.5) {
+                    let target_height = mineral_map.heightmap[(y - 1) * width + (x + 1)];
+                    best_move = Some((x + 1, y - 1, target_height));
+                }
+            }
+            // FLOWING PHYSICS (gold, silver) - flow like liquid
+            else if physics == PhysicsType::Flowing {
+                let mut candidates: Vec<(usize, usize, f32)> = Vec::new();
+
+                // Try to fall straight down
+                if y > 0 && can_move_to(x, y - 1) {
+                    let target_height = mineral_map.heightmap[(y - 1) * width + x];
+                    candidates.push((x, y - 1, target_height));
+                }
+                // Try diagonally down
+                if y > 0 && x > 0 && can_move_to(x - 1, y - 1) {
+                    let target_height = mineral_map.heightmap[(y - 1) * width + (x - 1)];
+                    candidates.push((x - 1, y - 1, target_height));
+                }
+                if y > 0 && x < width - 1 && can_move_to(x + 1, y - 1) {
+                    let target_height = mineral_map.heightmap[(y - 1) * width + (x + 1)];
+                    candidates.push((x + 1, y - 1, target_height));
+                }
+
+                // If can't fall, try flowing horizontally to lower height
+                if candidates.is_empty() {
+                    // Try left
+                    if x > 0 && can_move_to(x - 1, y) {
+                        let target_height = mineral_map.heightmap[y * width + (x - 1)];
+                        if target_height < current_height - 1.0 && rng.gen_bool(0.66) {
+                            candidates.push((x - 1, y, target_height));
+                        }
+                    }
+                    // Try right
+                    if x < width - 1 && can_move_to(x + 1, y) {
+                        let target_height = mineral_map.heightmap[y * width + (x + 1)];
+                        if target_height < current_height - 1.0 && rng.gen_bool(0.66) {
+                            candidates.push((x + 1, y, target_height));
+                        }
+                    }
+                }
+
+                // Pick the candidate with lowest height
+                if !candidates.is_empty() {
+                    best_move = candidates.into_iter().min_by(|a, b| a.2.partial_cmp(&b.2).unwrap());
+                }
+            }
+
+            // Perform the move if we found a valid target
+            if let Some((nx, ny, _)) = best_move {
+                let target_idx = ny * width + nx;
+
+                // Swap the cells
+                next_data[target_idx] = cell.clone();
+                next_data[idx] = MineralCell {
+                    mineral_type: MineralType::Empty,
+                    density: 0.0,
+                    sampled: cell.sampled,
+                    mined: true,
+                };
+
+                // Update heightmap - material moved down increases target height
+                next_heightmap[target_idx] = current_height;
+                next_heightmap[idx] = current_height * 0.95; // Slightly lower when material leaves
+            }
+        }
+    }
+
+    // Update the mineral map with the new state
+    mineral_map.data = next_data;
+    mineral_map.heightmap = next_heightmap;
+}
+
+// System to update the mineral map texture after CA updates
+fn update_mineral_map_texture(
+    mineral_map: Res<MineralMap>,
+    mut images: ResMut<Assets<Image>>,
+    query: Query<&Sprite, With<MineralMapRenderer>>,
+) {
+    // Only update if the mineral map changed
+    if !mineral_map.is_changed() {
+        return;
+    }
+
+    // Find the mineral map sprite
+    for sprite in query.iter() {
+        if let Some(image) = images.get_mut(&sprite.image) {
+            // Update the texture data
+            let mut new_data = Vec::with_capacity(MAP_WIDTH * MAP_HEIGHT * 4);
+
+            for cell in &mineral_map.data {
+                let color = cell.mineral_type.color();
+                let brightness = 0.5 + cell.density * 0.5;
+                new_data.push((color.to_srgba().red * brightness * 255.0) as u8);
+                new_data.push((color.to_srgba().green * brightness * 255.0) as u8);
+                new_data.push((color.to_srgba().blue * brightness * 255.0) as u8);
+                new_data.push(255);
+            }
+
+            image.data = Some(new_data);
         }
     }
 }
