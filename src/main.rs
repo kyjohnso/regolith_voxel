@@ -1424,7 +1424,7 @@ fn cellular_automata_system(
                 let (nx, ny, target_height) = chosen;
                 let target_idx = ny * width + nx;
 
-                // Move material to target (carry full height)
+                // Move material to target
                 next_data[target_idx] = cell.clone();
                 next_data[idx] = MineralCell {
                     mineral_type: MineralType::Empty,
@@ -1433,9 +1433,14 @@ fn cellular_automata_system(
                     mined: true,
                 };
 
-                // Material carries its full height to destination
-                next_heightmap[target_idx] = current_height;
-                next_heightmap[idx] = 0.0; // Source becomes void
+                // Only transfer 1 unit of height (like 1 grain sliding down)
+                next_heightmap[target_idx] = target_height + 1.0;
+                next_heightmap[idx] = current_height - 1.0;
+
+                // If source height is depleted, it stays empty
+                if next_heightmap[idx] < 0.5 {
+                    next_heightmap[idx] = 0.0;
+                }
             }
         }
     }
