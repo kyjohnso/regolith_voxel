@@ -182,11 +182,17 @@ impl MineralMap {
                 let height = if mineral_type == MineralType::Empty {
                     0.0
                 } else {
-                    // Base height on density plus some variation
-                    let height_scale = 0.05;
-                    let height_variation = height_noise.get([x as f64 * height_scale, y as f64 * height_scale]);
-                    let base_height = density * 100.0; // Material creates height
-                    base_height + (height_variation as f32 * 20.0)
+                    // Create dramatic height variation for interesting terrain
+                    let height_scale = 0.02; // Larger features
+                    let detail_scale = 0.08; // Fine detail
+
+                    let large_variation = height_noise.get([x as f64 * height_scale, y as f64 * height_scale]);
+                    let detail = height_noise.get([x as f64 * detail_scale, y as f64 * detail_scale]);
+
+                    // Combine for dramatic height differences (0-200 range)
+                    let base_height = density * 80.0;
+                    let terrain = (large_variation as f32 * 60.0) + (detail as f32 * 40.0);
+                    (base_height + terrain).max(5.0) // Minimum height 5
                 };
                 heightmap.push(height);
             }
@@ -1353,15 +1359,19 @@ fn equipment_mining_system(
                     let y = map_y + dy;
 
                     if x >= 0 && x < MAP_WIDTH as i32 && y >= 0 && y < MAP_HEIGHT as i32 {
-                        if let Some(cell) = mineral_map.get_mut(x as usize, y as usize) {
-                            // Mine the cell (set to empty)
-                            cell.mineral_type = MineralType::Empty;
-                            cell.mined = true;
-                            cell.density = 0.0;
+                        let idx = y as usize * MAP_WIDTH + x as usize;
 
-                            // Update heightmap - empty cells have 0 height (creates void)
-                            let idx = y as usize * MAP_WIDTH + x as usize;
-                            mineral_map.heightmap[idx] = 0.0;
+                        // Gradually reduce height by mining
+                        mineral_map.heightmap[idx] = (mineral_map.heightmap[idx] - 5.0).max(0.0);
+
+                        // If height is depleted, remove the material
+                        if mineral_map.heightmap[idx] <= 0.5 {
+                            if let Some(cell) = mineral_map.get_mut(x as usize, y as usize) {
+                                cell.mineral_type = MineralType::Empty;
+                                cell.mined = true;
+                                cell.density = 0.0;
+                                mineral_map.heightmap[idx] = 0.0;
+                            }
                         }
                     }
                 }
@@ -1438,15 +1448,15 @@ fn cellular_automata_system(
                 // Calculate height difference threshold
                 let height_diff = current_height - neighbor_height;
 
-                // GRANULAR PHYSICS - only move to much lower areas
+                // GRANULAR PHYSICS - move to lower areas
                 if physics == PhysicsType::Granular {
-                    if height_diff > 20.0 && rng.gen_bool(0.3) {
+                    if height_diff > 10.0 && rng.gen_bool(0.4) {
                         candidates.push((nx, ny, neighbor_height));
                     }
                 }
-                // FLOWING PHYSICS - move to moderately lower areas
+                // FLOWING PHYSICS - move to slightly lower areas
                 else if physics == PhysicsType::Flowing {
-                    if height_diff > 10.0 && rng.gen_bool(0.5) {
+                    if height_diff > 5.0 && rng.gen_bool(0.6) {
                         candidates.push((nx, ny, neighbor_height));
                     }
                 }
@@ -1519,8 +1529,8 @@ fn update_mineral_map_texture(
                     for (idx, cell) in mineral_map.data.iter().enumerate() {
                         let height = mineral_map.heightmap[idx];
 
-                        // Map height to grayscale (0-150 range typically)
-                        let normalized = (height / 150.0).clamp(0.0, 1.0);
+                        // Map height to grayscale (0-200 range with dramatic variation)
+                        let normalized = (height / 200.0).clamp(0.0, 1.0);
                         let gray_value = (normalized * 255.0) as u8;
 
                         // Color empty cells slightly blue to distinguish them
