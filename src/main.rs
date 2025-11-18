@@ -176,12 +176,17 @@ impl MineralMap {
                     mined: false,
                 });
 
-                // Generate heightmap using different noise
-                // Height increases with depth (y) + some variation
-                let height_scale = 0.03;
-                let height_variation = height_noise.get([x as f64 * height_scale, y as f64 * height_scale]);
-                let base_height = y as f32; // Deeper = higher base height
-                let height = base_height + (height_variation as f32 * 50.0); // Add variation
+                // Generate heightmap - represents material depth/height at this location
+                // Empty cells have height 0, filled cells have height based on material density
+                let height = if mineral_type == MineralType::Empty {
+                    0.0
+                } else {
+                    // Base height on density plus some variation
+                    let height_scale = 0.05;
+                    let height_variation = height_noise.get([x as f64 * height_scale, y as f64 * height_scale]);
+                    let base_height = density * 100.0; // Material creates height
+                    base_height + (height_variation as f32 * 20.0)
+                };
                 heightmap.push(height);
             }
         }
@@ -1320,9 +1325,9 @@ fn equipment_mining_system(
                             cell.mined = true;
                             cell.density = 0.0;
 
-                            // Update heightmap - reduce height when material is removed
+                            // Update heightmap - empty cells have 0 height (creates void)
                             let idx = y as usize * MAP_WIDTH + x as usize;
-                            mineral_map.heightmap[idx] *= 0.9;
+                            mineral_map.heightmap[idx] = 0.0;
                         }
                     }
                 }
@@ -1352,7 +1357,7 @@ fn cellular_automata_system(
 
     let mut rng = thread_rng();
 
-    // Process from top to bottom, left to right for falling behavior
+    // Process all cells - materials flow toward lower heights in ANY direction
     for y in 0..height {
         for x in 0..width {
             let idx = y * width + x;
@@ -1365,84 +1370,61 @@ fn cellular_automata_system(
 
             let current_height = mineral_map.heightmap[idx];
 
-            // Check neighbors and find the lowest height to flow into
-            let mut best_move: Option<(usize, usize, f32)> = None; // (nx, ny, height)
+            // Check all 4 cardinal neighbors (simpler, more stable)
+            let mut candidates: Vec<(usize, usize, f32)> = Vec::new();
 
-            // Helper to check if a position is valid and empty
-            let can_move_to = |nx: usize, ny: usize| -> bool {
-                if nx >= width || ny >= height {
-                    return false;
-                }
-                let target_idx = ny * width + nx;
-                mineral_map.data[target_idx].mineral_type.physics_type() == PhysicsType::Empty
-            };
+            // Define 4 directions (N, E, S, W)
+            let directions = [
+                (0, -1),  // N
+                (1, 0),   // E
+                (0, 1),   // S
+                (-1, 0),  // W
+            ];
 
-            // GRANULAR PHYSICS (coal, iron, copper) - fall like sand
-            if physics == PhysicsType::Granular {
-                // Try to fall straight down (y+1 is down in image coordinates)
-                if y < height - 1 && can_move_to(x, y + 1) {
-                    let target_height = mineral_map.heightmap[(y + 1) * width + x];
-                    best_move = Some((x, y + 1, target_height));
-                }
-                // Try diagonally down-left
-                else if y < height - 1 && x > 0 && can_move_to(x - 1, y + 1) && rng.gen_bool(0.5) {
-                    let target_height = mineral_map.heightmap[(y + 1) * width + (x - 1)];
-                    best_move = Some((x - 1, y + 1, target_height));
-                }
-                // Try diagonally down-right
-                else if y < height - 1 && x < width - 1 && can_move_to(x + 1, y + 1) && rng.gen_bool(0.5) {
-                    let target_height = mineral_map.heightmap[(y + 1) * width + (x + 1)];
-                    best_move = Some((x + 1, y + 1, target_height));
-                }
-            }
-            // FLOWING PHYSICS (gold, silver) - flow like liquid
-            else if physics == PhysicsType::Flowing {
-                let mut candidates: Vec<(usize, usize, f32)> = Vec::new();
+            for (dx, dy) in directions.iter() {
+                let nx = x as i32 + dx;
+                let ny = y as i32 + dy;
 
-                // Try to fall straight down (y+1 is down in image coordinates)
-                if y < height - 1 && can_move_to(x, y + 1) {
-                    let target_height = mineral_map.heightmap[(y + 1) * width + x];
-                    candidates.push((x, y + 1, target_height));
-                }
-                // Try diagonally down
-                if y < height - 1 && x > 0 && can_move_to(x - 1, y + 1) {
-                    let target_height = mineral_map.heightmap[(y + 1) * width + (x - 1)];
-                    candidates.push((x - 1, y + 1, target_height));
-                }
-                if y < height - 1 && x < width - 1 && can_move_to(x + 1, y + 1) {
-                    let target_height = mineral_map.heightmap[(y + 1) * width + (x + 1)];
-                    candidates.push((x + 1, y + 1, target_height));
+                // Check bounds
+                if nx < 0 || nx >= width as i32 || ny < 0 || ny >= height as i32 {
+                    continue;
                 }
 
-                // If can't fall, try flowing horizontally to lower height
-                if candidates.is_empty() {
-                    // Try left
-                    if x > 0 && can_move_to(x - 1, y) {
-                        let target_height = mineral_map.heightmap[y * width + (x - 1)];
-                        if target_height < current_height - 1.0 && rng.gen_bool(0.66) {
-                            candidates.push((x - 1, y, target_height));
-                        }
-                    }
-                    // Try right
-                    if x < width - 1 && can_move_to(x + 1, y) {
-                        let target_height = mineral_map.heightmap[y * width + (x + 1)];
-                        if target_height < current_height - 1.0 && rng.gen_bool(0.66) {
-                            candidates.push((x + 1, y, target_height));
-                        }
+                let nx = nx as usize;
+                let ny = ny as usize;
+                let neighbor_idx = ny * width + nx;
+                let neighbor_height = mineral_map.heightmap[neighbor_idx];
+                let neighbor_physics = mineral_map.data[neighbor_idx].mineral_type.physics_type();
+
+                // Only move if target is already processed (in next_data) and is empty
+                if next_data[neighbor_idx].mineral_type.physics_type() != PhysicsType::Empty {
+                    continue;
+                }
+
+                // Calculate height difference threshold
+                let height_diff = current_height - neighbor_height;
+
+                // GRANULAR PHYSICS - only move to much lower areas
+                if physics == PhysicsType::Granular {
+                    if height_diff > 20.0 && rng.gen_bool(0.3) {
+                        candidates.push((nx, ny, neighbor_height));
                     }
                 }
-
-                // Pick the candidate with lowest height
-                if !candidates.is_empty() {
-                    best_move = candidates.into_iter().min_by(|a, b| a.2.partial_cmp(&b.2).unwrap());
+                // FLOWING PHYSICS - move to moderately lower areas
+                else if physics == PhysicsType::Flowing {
+                    if height_diff > 10.0 && rng.gen_bool(0.5) {
+                        candidates.push((nx, ny, neighbor_height));
+                    }
                 }
             }
 
-            // Perform the move if we found a valid target
-            if let Some((nx, ny, _)) = best_move {
+            // Pick a random candidate (don't always pick lowest for variety)
+            if !candidates.is_empty() && rng.gen_bool(0.3) {
+                let chosen = candidates[rng.gen_range(0..candidates.len())];
+                let (nx, ny, target_height) = chosen;
                 let target_idx = ny * width + nx;
 
-                // Swap the cells
+                // Move material to target (carry full height)
                 next_data[target_idx] = cell.clone();
                 next_data[idx] = MineralCell {
                     mineral_type: MineralType::Empty,
@@ -1451,9 +1433,9 @@ fn cellular_automata_system(
                     mined: true,
                 };
 
-                // Update heightmap - material moved down increases target height
+                // Material carries its full height to destination
                 next_heightmap[target_idx] = current_height;
-                next_heightmap[idx] = current_height * 0.95; // Slightly lower when material leaves
+                next_heightmap[idx] = 0.0; // Source becomes void
             }
         }
     }
