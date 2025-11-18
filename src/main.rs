@@ -1352,8 +1352,8 @@ fn cellular_automata_system(
 
     let mut rng = thread_rng();
 
-    // Process from bottom to top, left to right for falling behavior
-    for y in (0..height).rev() {
+    // Process from top to bottom, left to right for falling behavior
+    for y in 0..height {
         for x in 0..width {
             let idx = y * width + x;
             let cell = &mineral_map.data[idx];
@@ -1379,39 +1379,39 @@ fn cellular_automata_system(
 
             // GRANULAR PHYSICS (coal, iron, copper) - fall like sand
             if physics == PhysicsType::Granular {
-                // Try to fall straight down
-                if y > 0 && can_move_to(x, y - 1) {
-                    let target_height = mineral_map.heightmap[(y - 1) * width + x];
-                    best_move = Some((x, y - 1, target_height));
+                // Try to fall straight down (y+1 is down in image coordinates)
+                if y < height - 1 && can_move_to(x, y + 1) {
+                    let target_height = mineral_map.heightmap[(y + 1) * width + x];
+                    best_move = Some((x, y + 1, target_height));
                 }
                 // Try diagonally down-left
-                else if y > 0 && x > 0 && can_move_to(x - 1, y - 1) && rng.gen_bool(0.5) {
-                    let target_height = mineral_map.heightmap[(y - 1) * width + (x - 1)];
-                    best_move = Some((x - 1, y - 1, target_height));
+                else if y < height - 1 && x > 0 && can_move_to(x - 1, y + 1) && rng.gen_bool(0.5) {
+                    let target_height = mineral_map.heightmap[(y + 1) * width + (x - 1)];
+                    best_move = Some((x - 1, y + 1, target_height));
                 }
                 // Try diagonally down-right
-                else if y > 0 && x < width - 1 && can_move_to(x + 1, y - 1) && rng.gen_bool(0.5) {
-                    let target_height = mineral_map.heightmap[(y - 1) * width + (x + 1)];
-                    best_move = Some((x + 1, y - 1, target_height));
+                else if y < height - 1 && x < width - 1 && can_move_to(x + 1, y + 1) && rng.gen_bool(0.5) {
+                    let target_height = mineral_map.heightmap[(y + 1) * width + (x + 1)];
+                    best_move = Some((x + 1, y + 1, target_height));
                 }
             }
             // FLOWING PHYSICS (gold, silver) - flow like liquid
             else if physics == PhysicsType::Flowing {
                 let mut candidates: Vec<(usize, usize, f32)> = Vec::new();
 
-                // Try to fall straight down
-                if y > 0 && can_move_to(x, y - 1) {
-                    let target_height = mineral_map.heightmap[(y - 1) * width + x];
-                    candidates.push((x, y - 1, target_height));
+                // Try to fall straight down (y+1 is down in image coordinates)
+                if y < height - 1 && can_move_to(x, y + 1) {
+                    let target_height = mineral_map.heightmap[(y + 1) * width + x];
+                    candidates.push((x, y + 1, target_height));
                 }
                 // Try diagonally down
-                if y > 0 && x > 0 && can_move_to(x - 1, y - 1) {
-                    let target_height = mineral_map.heightmap[(y - 1) * width + (x - 1)];
-                    candidates.push((x - 1, y - 1, target_height));
+                if y < height - 1 && x > 0 && can_move_to(x - 1, y + 1) {
+                    let target_height = mineral_map.heightmap[(y + 1) * width + (x - 1)];
+                    candidates.push((x - 1, y + 1, target_height));
                 }
-                if y > 0 && x < width - 1 && can_move_to(x + 1, y - 1) {
-                    let target_height = mineral_map.heightmap[(y - 1) * width + (x + 1)];
-                    candidates.push((x + 1, y - 1, target_height));
+                if y < height - 1 && x < width - 1 && can_move_to(x + 1, y + 1) {
+                    let target_height = mineral_map.heightmap[(y + 1) * width + (x + 1)];
+                    candidates.push((x + 1, y + 1, target_height));
                 }
 
                 // If can't fall, try flowing horizontally to lower height
