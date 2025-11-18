@@ -1438,51 +1438,56 @@ fn cellular_automata_system(
                 let ny = ny as usize;
                 let neighbor_idx = ny * width + nx;
                 let neighbor_height = mineral_map.heightmap[neighbor_idx];
-                let neighbor_physics = mineral_map.data[neighbor_idx].mineral_type.physics_type();
 
-                // Only move if target is already processed (in next_data) and is empty
-                if next_data[neighbor_idx].mineral_type.physics_type() != PhysicsType::Empty {
-                    continue;
-                }
-
-                // Calculate height difference threshold
+                // Calculate height difference
                 let height_diff = current_height - neighbor_height;
 
-                // GRANULAR PHYSICS - move to lower areas
+                // Materials flow toward lower heights based on physics type
+                // GRANULAR PHYSICS - move to areas with significantly lower height
                 if physics == PhysicsType::Granular {
-                    if height_diff > 10.0 && rng.gen_bool(0.4) {
+                    // Need bigger height difference to move
+                    if height_diff > 8.0 && rng.gen_bool(0.5) {
                         candidates.push((nx, ny, neighbor_height));
                     }
                 }
-                // FLOWING PHYSICS - move to slightly lower areas
+                // FLOWING PHYSICS - move to areas with moderately lower height
                 else if physics == PhysicsType::Flowing {
-                    if height_diff > 5.0 && rng.gen_bool(0.6) {
+                    // More sensitive to height differences
+                    if height_diff > 4.0 && rng.gen_bool(0.7) {
                         candidates.push((nx, ny, neighbor_height));
                     }
                 }
             }
 
             // Pick a random candidate (don't always pick lowest for variety)
-            if !candidates.is_empty() && rng.gen_bool(0.3) {
+            if !candidates.is_empty() && rng.gen_bool(0.4) {
                 let chosen = candidates[rng.gen_range(0..candidates.len())];
                 let (nx, ny, target_height) = chosen;
                 let target_idx = ny * width + nx;
 
-                // Move material to target
-                next_data[target_idx] = cell.clone();
-                next_data[idx] = MineralCell {
-                    mineral_type: MineralType::Empty,
-                    density: 0.0,
-                    sampled: cell.sampled,
-                    mined: true,
-                };
+                // Transfer height between cells (like grains sliding down)
+                let height_transfer = 1.0; // Transfer 1 unit of height
 
-                // Only transfer 1 unit of height (like 1 grain sliding down)
-                next_heightmap[target_idx] = target_height + 1.0;
-                next_heightmap[idx] = current_height - 1.0;
+                // If target is empty or has very low height, place our material there
+                if next_data[target_idx].mineral_type == MineralType::Empty || next_heightmap[target_idx] < 1.0 {
+                    next_data[target_idx] = cell.clone();
+                    next_heightmap[target_idx] = target_height + height_transfer;
+                } else {
+                    // Target has material - just add height (visual only, material stays)
+                    next_heightmap[target_idx] = target_height + height_transfer;
+                }
 
-                // If source height is depleted, it stays empty
+                // Reduce source height
+                next_heightmap[idx] = current_height - height_transfer;
+
+                // If source height is depleted, remove the material
                 if next_heightmap[idx] < 0.5 {
+                    next_data[idx] = MineralCell {
+                        mineral_type: MineralType::Empty,
+                        density: 0.0,
+                        sampled: cell.sampled,
+                        mined: true,
+                    };
                     next_heightmap[idx] = 0.0;
                 }
             }
