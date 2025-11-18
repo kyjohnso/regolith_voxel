@@ -38,6 +38,7 @@ fn main() {
         .init_resource::<EquipmentTreeActions>()
         .init_resource::<SelectedEquipment>()
         .init_resource::<CellularAutomataTimer>()
+        .init_resource::<ViewMode>()
         .add_systems(Startup, (setup, load_equipment_sprites))
         .add_systems(Update, (
             ui_system,
@@ -602,6 +603,14 @@ impl Default for CellularAutomataTimer {
     }
 }
 
+// View mode for the map display
+#[derive(Resource, Default, PartialEq)]
+enum ViewMode {
+    #[default]
+    Minerals,
+    Heightmap,
+}
+
 fn setup(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
@@ -936,6 +945,7 @@ fn ui_system(
     mut equipment_state: ResMut<EquipmentTreeState>,
     mut equipment_actions: ResMut<EquipmentTreeActions>,
     selected: Res<SelectedEquipment>,
+    mut view_mode: ResMut<ViewMode>,
 ) {
     let ctx = contexts.ctx_mut();
 
@@ -960,19 +970,43 @@ fn ui_system(
         });
     });
 
-    // Left panel - Legend
+    // Left panel - Legend and View Toggle
     egui::SidePanel::left("left_panel").show(ctx, |ui| {
-        ui.heading("Minerals");
+        ui.heading("View Mode");
         ui.separator();
 
-        ui.label("Legend:");
-        ui.colored_label(egui::Color32::from_rgb(204, 102, 51), "■ Iron");
-        ui.colored_label(egui::Color32::from_rgb(184, 115, 51), "■ Copper");
-        ui.colored_label(egui::Color32::from_rgb(255, 215, 0), "■ Gold");
-        ui.colored_label(egui::Color32::from_rgb(192, 192, 192), "■ Silver");
-        ui.colored_label(egui::Color32::from_rgb(51, 204, 51), "■ Uranium");
-        ui.colored_label(egui::Color32::from_rgb(102, 204, 255), "■ Diamond");
-        ui.colored_label(egui::Color32::from_rgb(51, 51, 51), "■ Coal");
+        ui.label("Display:");
+        if ui.selectable_label(*view_mode == ViewMode::Minerals, "Minerals").clicked() {
+            *view_mode = ViewMode::Minerals;
+        }
+        if ui.selectable_label(*view_mode == ViewMode::Heightmap, "Heightmap").clicked() {
+            *view_mode = ViewMode::Heightmap;
+        }
+
+        ui.add_space(10.0);
+        ui.separator();
+
+        if *view_mode == ViewMode::Minerals {
+            ui.heading("Minerals");
+            ui.separator();
+            ui.label("Legend:");
+            ui.colored_label(egui::Color32::from_rgb(204, 102, 51), "■ Iron");
+            ui.colored_label(egui::Color32::from_rgb(184, 115, 51), "■ Copper");
+            ui.colored_label(egui::Color32::from_rgb(255, 215, 0), "■ Gold");
+            ui.colored_label(egui::Color32::from_rgb(192, 192, 192), "■ Silver");
+            ui.colored_label(egui::Color32::from_rgb(51, 204, 51), "■ Uranium");
+            ui.colored_label(egui::Color32::from_rgb(102, 204, 255), "■ Diamond");
+            ui.colored_label(egui::Color32::from_rgb(51, 51, 51), "■ Coal");
+        } else {
+            ui.heading("Heightmap");
+            ui.separator();
+            ui.label("Height Legend:");
+            ui.colored_label(egui::Color32::from_rgb(0, 0, 0), "■ 0 (Empty/Void)");
+            ui.colored_label(egui::Color32::from_rgb(64, 64, 64), "■ Low");
+            ui.colored_label(egui::Color32::from_rgb(128, 128, 128), "■ Medium");
+            ui.colored_label(egui::Color32::from_rgb(192, 192, 192), "■ High");
+            ui.colored_label(egui::Color32::from_rgb(255, 255, 255), "■ Very High");
+        }
     });
 
     // Right panel - Equipment Tree with Outliner
@@ -1453,27 +1487,55 @@ fn cellular_automata_system(
 // System to update the mineral map texture after CA updates
 fn update_mineral_map_texture(
     mineral_map: Res<MineralMap>,
+    view_mode: Res<ViewMode>,
     mut images: ResMut<Assets<Image>>,
     query: Query<&Sprite, With<MineralMapRenderer>>,
 ) {
-    // Only update if the mineral map changed
-    if !mineral_map.is_changed() {
+    // Only update if the mineral map or view mode changed
+    if !mineral_map.is_changed() && !view_mode.is_changed() {
         return;
     }
 
     // Find the mineral map sprite
     for sprite in query.iter() {
         if let Some(image) = images.get_mut(&sprite.image) {
-            // Update the texture data
+            // Update the texture data based on view mode
             let mut new_data = Vec::with_capacity(MAP_WIDTH * MAP_HEIGHT * 4);
 
-            for cell in &mineral_map.data {
-                let color = cell.mineral_type.color();
-                let brightness = 0.5 + cell.density * 0.5;
-                new_data.push((color.to_srgba().red * brightness * 255.0) as u8);
-                new_data.push((color.to_srgba().green * brightness * 255.0) as u8);
-                new_data.push((color.to_srgba().blue * brightness * 255.0) as u8);
-                new_data.push(255);
+            match *view_mode {
+                ViewMode::Minerals => {
+                    // Render minerals with colors
+                    for cell in &mineral_map.data {
+                        let color = cell.mineral_type.color();
+                        let brightness = 0.5 + cell.density * 0.5;
+                        new_data.push((color.to_srgba().red * brightness * 255.0) as u8);
+                        new_data.push((color.to_srgba().green * brightness * 255.0) as u8);
+                        new_data.push((color.to_srgba().blue * brightness * 255.0) as u8);
+                        new_data.push(255);
+                    }
+                }
+                ViewMode::Heightmap => {
+                    // Render heightmap as grayscale
+                    for (idx, cell) in mineral_map.data.iter().enumerate() {
+                        let height = mineral_map.heightmap[idx];
+
+                        // Map height to grayscale (0-150 range typically)
+                        let normalized = (height / 150.0).clamp(0.0, 1.0);
+                        let gray_value = (normalized * 255.0) as u8;
+
+                        // Color empty cells slightly blue to distinguish them
+                        if cell.mineral_type == MineralType::Empty {
+                            new_data.push(gray_value / 2);
+                            new_data.push(gray_value / 2);
+                            new_data.push(gray_value.saturating_add(30));
+                        } else {
+                            new_data.push(gray_value);
+                            new_data.push(gray_value);
+                            new_data.push(gray_value);
+                        }
+                        new_data.push(255);
+                    }
+                }
             }
 
             image.data = Some(new_data);
