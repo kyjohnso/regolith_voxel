@@ -16,7 +16,7 @@ use camera::camera_control_system;
 use equipment::{
     click_select_equipment, equipment_mining_system, load_equipment_sprites,
     move_selected_equipment, spawn_equipment_sprites, update_equipment_positions,
-    update_selection_outlines, EquipmentTreeActions, EquipmentTreeState, SelectedEquipment,
+    update_selection_sprites, EquipmentTreeActions, EquipmentTreeState, SelectedEquipment,
 };
 use scene::{
     cellular_automata_system, update_mineral_map_texture, CellularAutomataTimer, MineralMap,
@@ -59,7 +59,7 @@ fn main() {
                 click_select_equipment,
                 move_selected_equipment,
                 update_equipment_positions,
-                update_selection_outlines,
+                update_selection_sprites,
                 equipment_mining_system,
                 // Scene physics
                 cellular_automata_system,

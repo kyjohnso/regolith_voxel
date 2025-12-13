@@ -11,32 +11,24 @@ use crate::scene::{MineralMap, MineralType, MAP_HEIGHT, MAP_WIDTH};
 use super::{
     AttachmentState, EquipmentPiece, EquipmentSprite, EquipmentSprites,
     EquipmentTreeActions, EquipmentTreeNode, EquipmentTreeState, EquipmentType,
-    MinerBody, SamplerBody, SelectedEquipment, SelectionOutline, SmelterBody, TransportBody,
+    MinerBody, SamplerBody, SelectedEquipment, SmelterBody, TransportBody,
 };
 
-/// Load equipment sprites - generate them programmatically
+/// Load equipment sprites - generate them programmatically with distinct shapes
 pub fn load_equipment_sprites(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
-    let mut sprites = std::collections::HashMap::new();
+    let mut normal_sprites = std::collections::HashMap::new();
+    let mut selected_sprites = std::collections::HashMap::new();
+    let size = 48; // Larger sprites for more detail
 
-    // Helper to create a colored square sprite
-    fn create_colored_sprite(images: &mut ResMut<Assets<Image>>, color: [u8; 4]) -> Handle<Image> {
-        let size = 32;
+    // Helper to create sprite with custom drawing function
+    fn create_sprite<F>(images: &mut ResMut<Assets<Image>>, size: u32, draw_fn: F) -> Handle<Image>
+    where
+        F: Fn(u32, u32) -> [u8; 4],
+    {
         let mut pixel_data = Vec::new();
         for y in 0..size {
             for x in 0..size {
-                // Create a border effect
-                if x < 2 || x >= size - 2 || y < 2 || y >= size - 2 {
-                    // Border - slightly darker
-                    pixel_data.extend_from_slice(&[
-                        (color[0] as f32 * 0.7) as u8,
-                        (color[1] as f32 * 0.7) as u8,
-                        (color[2] as f32 * 0.7) as u8,
-                        color[3],
-                    ]);
-                } else {
-                    // Inner color
-                    pixel_data.extend_from_slice(&color);
-                }
+                pixel_data.extend_from_slice(&draw_fn(x, y));
             }
         }
 
@@ -55,29 +47,239 @@ pub fn load_equipment_sprites(mut commands: Commands, mut images: ResMut<Assets<
         images.add(image)
     }
 
-    // Create colored sprites for each equipment type
-    sprites.insert(
-        EquipmentType::Sampler,
-        create_colored_sprite(&mut images, [100, 200, 255, 255]), // Light blue
-    );
-    sprites.insert(
-        EquipmentType::SurfaceMining,
-        create_colored_sprite(&mut images, [255, 200, 100, 255]), // Orange
-    );
-    sprites.insert(
-        EquipmentType::DeepMining,
-        create_colored_sprite(&mut images, [200, 100, 255, 255]), // Purple
-    );
-    sprites.insert(
-        EquipmentType::Refining,
-        create_colored_sprite(&mut images, [255, 100, 100, 255]), // Red
-    );
-    sprites.insert(
-        EquipmentType::Transport,
-        create_colored_sprite(&mut images, [100, 255, 100, 255]), // Green
-    );
+    // Helper to create a selected version with green halo
+    fn create_selected_sprite<F>(images: &mut ResMut<Assets<Image>>, size: u32, draw_fn: F) -> Handle<Image>
+    where
+        F: Fn(u32, u32) -> [u8; 4],
+    {
+        let halo_size = 60; // Larger to accommodate halo
+        let offset = (halo_size - size) / 2; // Center the sprite
+        let center = halo_size as f32 / 2.0;
+        let equipment_radius = size as f32 / 2.0;
+        let halo_radius = halo_size as f32 / 2.0;
 
-    commands.insert_resource(EquipmentSprites { sprites });
+        let mut pixel_data = Vec::new();
+        for y in 0..halo_size {
+            for x in 0..halo_size {
+                // Calculate distance from center for halo effect
+                let dx = x as f32 - center;
+                let dy = y as f32 - center;
+                let distance = (dx * dx + dy * dy).sqrt();
+
+                // Check if we're in the sprite area
+                if x >= offset && x < offset + size && y >= offset && y < offset + size {
+                    // Draw the original sprite
+                    let sprite_color = draw_fn(x - offset, y - offset);
+                    pixel_data.extend_from_slice(&sprite_color);
+                } else if distance > equipment_radius && distance <= halo_radius {
+                    // Draw green halo
+                    let halo_thickness = halo_radius - equipment_radius;
+                    let dist_from_edge = distance - equipment_radius;
+                    let normalized = 1.0 - (dist_from_edge / halo_thickness);
+                    let alpha = (normalized * normalized * 200.0) as u8;
+                    pixel_data.extend_from_slice(&[0, 255, 0, alpha]);
+                } else {
+                    // Transparent
+                    pixel_data.extend_from_slice(&[0, 0, 0, 0]);
+                }
+            }
+        }
+
+        let image = Image::new(
+            Extent3d {
+                width: halo_size,
+                height: halo_size,
+                depth_or_array_layers: 1,
+            },
+            TextureDimension::D2,
+            pixel_data,
+            TextureFormat::Rgba8UnormSrgb,
+            Default::default(),
+        );
+
+        images.add(image)
+    }
+
+    // Sampler - Light blue with antenna/dish shape (like a radar)
+    let sampler_draw = |x: u32, y: u32| -> [u8; 4] {
+            let cx = size / 2;
+            let cy = size / 2;
+            let dx = x as i32 - cx as i32;
+            let dy = y as i32 - cy as i32;
+            let dist = ((dx * dx + dy * dy) as f32).sqrt();
+
+            // Tall antenna extending up
+            if x >= cx - 1 && x <= cx + 1 && y < cy - 4 {
+                [120, 200, 255, 255]
+            }
+            // Dish - multiple concentric circles
+            else if dist < 16.0 && dist > 14.0 {
+                [100, 200, 255, 255] // Outer ring
+            } else if dist < 14.0 && dist > 11.0 {
+                [70, 170, 235, 255] // Middle ring
+            } else if dist < 11.0 && dist > 8.0 {
+                [50, 150, 220, 255] // Inner ring
+            } else if dist < 8.0 {
+                [30, 120, 200, 255] // Center
+            }
+            // Tripod base
+            else if (x > cx - 2 && x < cx + 2 && y > cy + 10)
+                || ((x > cx - 10 && x < cx - 6 || x > cx + 6 && x < cx + 10) && y > cy + 14) {
+                [80, 80, 80, 255]
+            } else {
+                [0, 0, 0, 0]
+            }
+    };
+    normal_sprites.insert(EquipmentType::Sampler, create_sprite(&mut images, size, sampler_draw));
+    selected_sprites.insert(EquipmentType::Sampler, create_selected_sprite(&mut images, size, sampler_draw));
+
+    // Surface Miner - Orange excavator with bucket and tracks
+    let surface_miner_draw = |x: u32, y: u32| -> [u8; 4] {
+            let cx = size / 2;
+
+            // Main body
+            if x > 10 && x < 38 && y > 14 && y < 28 {
+                [255, 180, 80, 255]
+            }
+            // Cab (driver area)
+            else if x > 28 && x < 38 && y > 10 && y < 20 {
+                [255, 200, 100, 255]
+            }
+            // Boom arm extending forward
+            else if x > 4 && x < 18 && y > 16 && y < 20 {
+                [220, 160, 60, 255]
+            }
+            // Bucket at the end
+            else if x > 0 && x < 10 && y > 18 && y < 26 {
+                [200, 140, 40, 255]
+            }
+            // Tracks (left and right)
+            else if (x > 12 && x < 36) && (y > 26 && y < 32 || y > 34 && y < 38) {
+                [60, 60, 60, 255]
+            }
+            // Track details
+            else if (x > 12 && x < 36) && y > 32 && y < 34 {
+                [40, 40, 40, 255]
+            } else {
+                [0, 0, 0, 0]
+            }
+    };
+    normal_sprites.insert(EquipmentType::SurfaceMining, create_sprite(&mut images, size, surface_miner_draw));
+    selected_sprites.insert(EquipmentType::SurfaceMining, create_selected_sprite(&mut images, size, surface_miner_draw));
+
+    // Deep Miner - Purple drill rig with tall derrick
+    let deep_miner_draw = |x: u32, y: u32| -> [u8; 4] {
+            let cx = size / 2;
+
+            // Derrick tower structure (tall)
+            if (x >= cx - 2 && x <= cx + 2 && y > 2 && y < 20)
+                || (x >= cx - 8 && x <= cx + 8 && y > 18 && y < 20) {
+                [180, 80, 240, 255]
+            }
+            // Platform/base
+            else if x > 6 && x < 42 && y > 20 && y < 28 {
+                [200, 100, 255, 255]
+            }
+            // Heavy machinery on platform
+            else if x > 14 && x < 34 && y > 24 && y < 32 {
+                [160, 70, 200, 255]
+            }
+            // Thick drill pipe going down
+            else if x >= cx - 4 && x <= cx + 4 && y >= 28 && y < 46 {
+                [140, 50, 180, 255]
+            }
+            // Drill bit at bottom
+            else if x >= cx - 6 && x <= cx + 6 && y >= 42 && y < 46 {
+                [100, 30, 140, 255]
+            }
+            // Support legs
+            else if ((x > 8 && x < 12) || (x > 36 && x < 40)) && y > 28 && y < 38 {
+                [120, 60, 160, 255]
+            } else {
+                [0, 0, 0, 0]
+            }
+    };
+    normal_sprites.insert(EquipmentType::DeepMining, create_sprite(&mut images, size, deep_miner_draw));
+    selected_sprites.insert(EquipmentType::DeepMining, create_selected_sprite(&mut images, size, deep_miner_draw));
+
+    // Smelter - Red furnace building with smokestacks
+    let smelter_draw = |x: u32, y: u32| -> [u8; 4] {
+            let cx = size / 2;
+
+            // Main building structure
+            if x > 8 && x < 40 && y > 18 && y < 42 {
+                [255, 100, 100, 255]
+            }
+            // Roof
+            else if x > 6 && x < 42 && y > 16 && y < 20 {
+                [220, 80, 80, 255]
+            }
+            // Left smokestack
+            else if x >= cx - 12 && x <= cx - 6 && y > 4 && y < 18 {
+                [200, 70, 70, 255]
+            }
+            // Right smokestack
+            else if x >= cx + 6 && x <= cx + 12 && y > 4 && y < 18 {
+                [200, 70, 70, 255]
+            }
+            // Smoke (darker at top)
+            else if ((x >= cx - 14 && x <= cx - 4) || (x >= cx + 4 && x <= cx + 14)) && y > 0 && y < 6 {
+                [120, 120, 120, 200]
+            }
+            // Door
+            else if x > 18 && x < 30 && y > 28 && y < 40 {
+                [180, 60, 60, 255]
+            }
+            // Windows
+            else if ((x > 12 && x < 16) || (x > 32 && x < 36)) && y > 24 && y < 30 {
+                [255, 200, 100, 255]
+            } else {
+                [0, 0, 0, 0]
+            }
+    };
+    normal_sprites.insert(EquipmentType::Refining, create_sprite(&mut images, size, smelter_draw));
+    selected_sprites.insert(EquipmentType::Refining, create_selected_sprite(&mut images, size, smelter_draw));
+
+    // Transport - Green flatbed truck with cargo area
+    let transport_draw = |x: u32, y: u32| -> [u8; 4] {
+            // Flatbed cargo area
+            if x > 4 && x < 32 && y > 16 && y < 26 {
+                [100, 255, 100, 255]
+            }
+            // Cargo sides/rails
+            else if (x > 4 && x < 8 || x > 28 && x < 32) && y > 12 && y < 20 {
+                [80, 220, 80, 255]
+            }
+            // Cab
+            else if x > 28 && x < 44 && y > 10 && y < 26 {
+                [80, 200, 80, 255]
+            }
+            // Cab windows
+            else if x > 32 && x < 42 && y > 12 && y < 18 {
+                [150, 220, 255, 255]
+            }
+            // Front bumper
+            else if x > 42 && x < 46 && y > 18 && y < 26 {
+                [60, 160, 60, 255]
+            }
+            // Wheels (large and visible)
+            else if ((x > 8 && x < 16) || (x > 30 && x < 38)) && y > 24 && y < 34 {
+                [40, 40, 40, 255]
+            }
+            // Wheel hubs
+            else if ((x > 10 && x < 14) || (x > 32 && x < 36)) && y > 26 && y < 32 {
+                [80, 80, 80, 255]
+            } else {
+                [0, 0, 0, 0]
+            }
+    };
+    normal_sprites.insert(EquipmentType::Transport, create_sprite(&mut images, size, transport_draw));
+    selected_sprites.insert(EquipmentType::Transport, create_selected_sprite(&mut images, size, transport_draw));
+
+    commands.insert_resource(EquipmentSprites {
+        normal: normal_sprites,
+        selected: selected_sprites,
+    });
 }
 
 /// System to spawn sprite entities for equipment that doesn't have one yet
@@ -104,7 +306,7 @@ pub fn spawn_equipment_sprites(
         if let Some(equipment_type) = node.equipment_type() {
             if !existing_ids.contains(&node.id) {
                 // Equipment needs a sprite
-                if let Some(sprite_handle) = equipment_sprites.sprites.get(&equipment_type) {
+                if let Some(sprite_handle) = equipment_sprites.normal.get(&equipment_type) {
                     let position = node.position.unwrap_or_else(|| {
                         // Random position on map if not set
                         let mut rng = thread_rng();
@@ -131,6 +333,7 @@ pub fn spawn_equipment_sprites(
                         Transform::from_translation(position.extend(1.0)),
                         EquipmentSprite {
                             equipment_id: node.id,
+                            equipment_type,
                         },
                         equipment_piece,
                         attachment_state,
@@ -301,104 +504,33 @@ pub fn move_selected_equipment(
     }
 }
 
-/// System to manage selection outlines for selected equipment
-pub fn update_selection_outlines(
-    mut commands: Commands,
+/// System to swap sprites between normal and selected versions based on selection
+pub fn update_selection_sprites(
     selected: Res<SelectedEquipment>,
-    equipment_query: Query<(&Transform, &EquipmentSprite), Without<SelectionOutline>>,
-    mut outline_query: Query<
-        (Entity, &mut Transform, &SelectionOutline),
-        Without<EquipmentSprite>,
-    >,
-    mut images: ResMut<Assets<Image>>,
+    equipment_sprites: Res<EquipmentSprites>,
+    mut sprite_query: Query<(&mut Sprite, &EquipmentSprite)>,
 ) {
-    // Get the currently selected equipment ID
+    // Only update when selection changes
+    if !selected.is_changed() {
+        return;
+    }
+
     let selected_id = selected.selected_id;
 
-    // Find all existing outlines and check if they should exist
-    let mut outlines_to_remove = Vec::new();
-    for (entity, _transform, outline) in outline_query.iter() {
-        if Some(outline.equipment_id) != selected_id {
-            outlines_to_remove.push(entity);
-        }
-    }
+    // Update all equipment sprites
+    for (mut sprite, equipment_sprite) in sprite_query.iter_mut() {
+        let is_selected = Some(equipment_sprite.equipment_id) == selected_id;
 
-    // Remove outlines that shouldn't exist
-    for entity in outlines_to_remove {
-        commands.entity(entity).despawn();
-    }
+        // Choose the appropriate sprite (normal or selected)
+        let sprite_handle = if is_selected {
+            equipment_sprites.selected.get(&equipment_sprite.equipment_type)
+        } else {
+            equipment_sprites.normal.get(&equipment_sprite.equipment_type)
+        };
 
-    // If we have a selection, make sure it has an outline
-    if let Some(id) = selected_id {
-        // Check if an outline already exists for this equipment
-        let outline_exists = outline_query
-            .iter()
-            .any(|(_, _, outline)| outline.equipment_id == id);
-
-        if !outline_exists {
-            // Find the equipment sprite to get its position
-            for (transform, equipment_sprite) in equipment_query.iter() {
-                if equipment_sprite.equipment_id == id {
-                    // Create a green outline sprite
-                    let outline_size = 40;
-                    let inner_size = 34; // Inner transparent area
-                    let border_thickness = (outline_size - inner_size) / 2;
-
-                    // Create pixel data for the outline
-                    let mut pixel_data = Vec::new();
-                    for y in 0..outline_size {
-                        for x in 0..outline_size {
-                            // Check if this pixel is in the border area
-                            if x < border_thickness
-                                || x >= outline_size - border_thickness
-                                || y < border_thickness
-                                || y >= outline_size - border_thickness
-                            {
-                                // Green border
-                                pixel_data.extend_from_slice(&[0, 255, 0, 255]);
-                            } else {
-                                // Transparent center
-                                pixel_data.extend_from_slice(&[0, 0, 0, 0]);
-                            }
-                        }
-                    }
-
-                    let outline_image = Image::new(
-                        Extent3d {
-                            width: outline_size as u32,
-                            height: outline_size as u32,
-                            depth_or_array_layers: 1,
-                        },
-                        TextureDimension::D2,
-                        pixel_data,
-                        TextureFormat::Rgba8UnormSrgb,
-                        Default::default(),
-                    );
-
-                    let outline_handle = images.add(outline_image);
-
-                    // Spawn the outline sprite behind the equipment sprite
-                    commands.spawn((
-                        Sprite::from_image(outline_handle),
-                        Transform::from_translation(
-                            transform.translation - Vec3::new(0.0, 0.0, 0.5),
-                        ),
-                        SelectionOutline { equipment_id: id },
-                    ));
-
-                    break;
-                }
-            }
-        }
-    }
-
-    // Update outline positions to follow their equipment sprites
-    for (equipment_transform, equipment_sprite) in equipment_query.iter() {
-        for (_, mut outline_transform, outline) in outline_query.iter_mut() {
-            if outline.equipment_id == equipment_sprite.equipment_id {
-                outline_transform.translation =
-                    equipment_transform.translation - Vec3::new(0.0, 0.0, 0.5);
-            }
+        // Swap the sprite image
+        if let Some(handle) = sprite_handle {
+            sprite.image = handle.clone();
         }
     }
 }
