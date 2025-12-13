@@ -398,3 +398,36 @@ impl OutlinerActions<EquipmentTreeNode> for EquipmentTreeActions {
 pub struct SelectedEquipment {
     pub selected_id: Option<usize>,
 }
+
+/// Resource to manage attachment entities
+#[derive(Resource)]
+pub struct AttachmentManager {
+    pub attachments: Vec<AttachmentInfo>,
+    pub next_id: usize,
+}
+
+impl Default for AttachmentManager {
+    fn default() -> Self {
+        Self {
+            attachments: Vec::new(),
+            next_id: 1000, // Start at 1000 to avoid conflicts with equipment IDs
+        }
+    }
+}
+
+/// Information about a spawned attachment
+#[derive(Debug, Clone)]
+pub struct AttachmentInfo {
+    pub id: usize,
+    pub attachment_type: crate::equipment::AttachmentType,
+    pub parent_equipment_id: Option<usize>, // None if detached
+    pub offset_from_parent: bevy::prelude::Vec2, // Offset from parent equipment position
+}
+
+/// Event to request spawning an attachment
+#[derive(bevy::prelude::Event)]
+pub struct SpawnAttachmentEvent {
+    pub attachment_type: crate::equipment::AttachmentType,
+    pub position: bevy::prelude::Vec2,
+    pub parent_equipment_id: Option<usize>,
+}

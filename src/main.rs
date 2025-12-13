@@ -14,9 +14,10 @@ mod ui;
 
 use camera::camera_control_system;
 use equipment::{
-    click_select_equipment, equipment_mining_system, load_equipment_sprites,
-    move_selected_equipment, spawn_equipment_sprites, update_equipment_positions,
-    update_selection_sprites, EquipmentTreeActions, EquipmentTreeState, SelectedEquipment,
+    click_select_equipment, equipment_mining_system, load_equipment_sprites, load_attachment_sprites,
+    move_selected_equipment, spawn_equipment_sprites, spawn_attachments, update_equipment_positions,
+    update_attachment_positions, update_selection_sprites, delete_selected_attachment,
+    EquipmentTreeActions, EquipmentTreeState, SelectedEquipment, AttachmentManager, SpawnAttachmentEvent,
 };
 use scene::{
     cellular_automata_system, update_mineral_map_texture, CellularAutomataTimer, MineralMap,
@@ -45,8 +46,11 @@ fn main() {
         .init_resource::<EquipmentTreeState>()
         .init_resource::<EquipmentTreeActions>()
         .init_resource::<SelectedEquipment>()
+        .init_resource::<AttachmentManager>()
+        // Events
+        .add_event::<SpawnAttachmentEvent>()
         // Systems
-        .add_systems(Startup, (setup, load_equipment_sprites))
+        .add_systems(Startup, (setup, load_equipment_sprites, load_attachment_sprites))
         .add_systems(
             Update,
             (
@@ -56,10 +60,13 @@ fn main() {
                 camera_control_system,
                 // Equipment
                 spawn_equipment_sprites,
+                spawn_attachments,
                 click_select_equipment,
                 move_selected_equipment,
                 update_equipment_positions,
+                update_attachment_positions,
                 update_selection_sprites,
+                delete_selected_attachment,
                 equipment_mining_system,
                 // Scene physics
                 cellular_automata_system,
