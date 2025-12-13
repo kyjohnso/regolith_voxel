@@ -563,61 +563,81 @@ pub fn spawn_attachments(
         // Use standard offset based on attachment type
         let offset_from_parent = event.attachment_type.standard_offset();
 
-        // Find parent equipment entity and position
-        let (_parent_entity, spawn_position, attachment_state) = if let Some(parent_id) = event.parent_equipment_id {
-            equipment_query
-                .iter()
-                .find_map(|(entity, transform, sprite)| {
-                    if sprite.equipment_id == parent_id {
-                        let parent_pos = transform.translation.truncate();
-                        let spawn_pos = parent_pos + offset_from_parent;
-                        Some((
-                            Some(entity),
-                            spawn_pos,
-                            super::AttachmentState::AttachedToEquipment { parent: entity },
-                        ))
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or((None, event.position, super::AttachmentState::Detached { position: event.position }))
-        } else {
-            (None, event.position, super::AttachmentState::Detached { position: event.position })
-        };
-
         // Get the appropriate sprite
         if let Some(sprite_handle) = attachment_sprites.normal.get(&event.attachment_type) {
-            // Create the attachment entity
-            let mut entity_commands = commands.spawn((
-                Sprite::from_image(sprite_handle.clone()),
-                Transform::from_translation(spawn_position.extend(2.0)), // Higher z to appear above equipment
-                AttachmentSprite {
-                    attachment_id,
+            // Find parent equipment entity if attaching
+            if let Some(parent_id) = event.parent_equipment_id {
+                if let Some((parent_entity, _transform, _sprite)) = equipment_query
+                    .iter()
+                    .find(|(_, _, sprite)| sprite.equipment_id == parent_id)
+                {
+                    // Spawn as child of equipment entity
+                    commands.entity(parent_entity).with_children(|parent| {
+                        let mut child = parent.spawn((
+                            Sprite::from_image(sprite_handle.clone()),
+                            Transform::from_translation(offset_from_parent.extend(1.0)), // Offset relative to parent
+                            AttachmentSprite {
+                                attachment_id,
+                                attachment_type: event.attachment_type,
+                            },
+                            super::AttachmentState::AttachedToEquipment { parent: parent_entity },
+                        ));
+
+                        // Add the specific attachment component
+                        match event.attachment_type {
+                            AttachmentType::Transmitter => {
+                                child.insert(Transmitter::default());
+                            }
+                            AttachmentType::Receiver => {
+                                child.insert(Receiver::default());
+                            }
+                            AttachmentType::Computer => {
+                                child.insert(Computer::default());
+                            }
+                        }
+                    });
+
+                    // Track the attachment
+                    attachment_manager.attachments.push(AttachmentInfo {
+                        id: attachment_id,
+                        attachment_type: event.attachment_type,
+                        parent_equipment_id: Some(parent_id),
+                        offset_from_parent,
+                    });
+                }
+            } else {
+                // Spawn as standalone detached entity
+                let mut entity_commands = commands.spawn((
+                    Sprite::from_image(sprite_handle.clone()),
+                    Transform::from_translation(event.position.extend(2.0)),
+                    AttachmentSprite {
+                        attachment_id,
+                        attachment_type: event.attachment_type,
+                    },
+                    super::AttachmentState::Detached { position: event.position },
+                ));
+
+                // Add the specific attachment component
+                match event.attachment_type {
+                    AttachmentType::Transmitter => {
+                        entity_commands.insert(Transmitter::default());
+                    }
+                    AttachmentType::Receiver => {
+                        entity_commands.insert(Receiver::default());
+                    }
+                    AttachmentType::Computer => {
+                        entity_commands.insert(Computer::default());
+                    }
+                }
+
+                // Track the attachment
+                attachment_manager.attachments.push(AttachmentInfo {
+                    id: attachment_id,
                     attachment_type: event.attachment_type,
-                },
-                attachment_state,
-            ));
-
-            // Add the specific attachment component
-            match event.attachment_type {
-                AttachmentType::Transmitter => {
-                    entity_commands.insert(Transmitter::default());
-                }
-                AttachmentType::Receiver => {
-                    entity_commands.insert(Receiver::default());
-                }
-                AttachmentType::Computer => {
-                    entity_commands.insert(Computer::default());
-                }
+                    parent_equipment_id: None,
+                    offset_from_parent,
+                });
             }
-
-            // Track the attachment
-            attachment_manager.attachments.push(AttachmentInfo {
-                id: attachment_id,
-                attachment_type: event.attachment_type,
-                parent_equipment_id: event.parent_equipment_id,
-                offset_from_parent,
-            });
         }
     }
 }
@@ -652,7 +672,7 @@ pub fn click_select_equipment(
     windows: Query<&Window, With<PrimaryWindow>>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
     equipment_query: Query<(&Transform, &EquipmentSprite)>,
-    attachment_query: Query<(&Transform, &super::AttachmentSprite)>,
+    attachment_query: Query<(&GlobalTransform, &super::AttachmentSprite)>,
     mut selected: ResMut<SelectedEquipment>,
     mut equipment_state: ResMut<EquipmentTreeState>,
     mut equipment_actions: ResMut<EquipmentTreeActions>,
@@ -691,8 +711,8 @@ pub fn click_select_equipment(
         let mut clicked_id: Option<usize> = None;
         let attachment_size = 24.0; // Attachment sprite click radius
 
-        for (transform, attachment_sprite) in &attachment_query {
-            let sprite_pos = transform.translation.truncate();
+        for (global_transform, attachment_sprite) in &attachment_query {
+            let sprite_pos = global_transform.translation().truncate();
             let distance = world_position.distance(sprite_pos);
 
             if distance < attachment_size {
@@ -871,12 +891,111 @@ pub fn delete_selected_attachment(
     }
 }
 
+/// System to attach selected attachments to nearby compatible equipment with 'T' key
+pub fn attach_selected_attachment(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    selected: Res<SelectedEquipment>,
+    mut commands: Commands,
+    mut attachment_manager: ResMut<super::AttachmentManager>,
+    attachment_query: Query<(Entity, &Transform, &super::AttachmentState, &super::AttachmentSprite)>,
+    equipment_query: Query<(Entity, &Transform, &EquipmentSprite, Option<&super::HasCommunicationMount>, Option<&super::HasControlMount>, Option<&super::HasUtilityMount>)>,
+) {
+    use super::AttachmentType;
+
+    // Only process on 'T' key press
+    if !keyboard.just_pressed(KeyCode::KeyT) {
+        return;
+    }
+
+    if selected.selected_ids.is_empty() {
+        return;
+    }
+
+    const MAX_ATTACH_DISTANCE: f32 = 20.0;
+
+    // Attach all selected detached attachments
+    for (attachment_entity, attachment_transform, attachment_state, attachment_sprite) in &attachment_query {
+        if selected.selected_ids.contains(&attachment_sprite.attachment_id) {
+            // Check if it's currently detached
+            if matches!(*attachment_state, super::AttachmentState::Detached { .. }) {
+                // Get attachment info to find its type
+                if let Some(attachment_info) = attachment_manager
+                    .attachments
+                    .iter()
+                    .find(|a| a.id == attachment_sprite.attachment_id)
+                {
+                    let attachment_pos = attachment_transform.translation.truncate();
+                    let attachment_type = attachment_info.attachment_type;
+
+                    // Find nearest compatible equipment within range
+                    let mut nearest_equipment: Option<(Entity, usize, f32, Vec2)> = None;
+
+                    for (equipment_entity, equipment_transform, equipment_sprite, has_comm, has_control, _has_utility) in &equipment_query {
+                        let equipment_pos = equipment_transform.translation.truncate();
+                        let distance = attachment_pos.distance(equipment_pos);
+
+                        if distance > MAX_ATTACH_DISTANCE {
+                            continue;
+                        }
+
+                        // Check if equipment has compatible mount point
+                        let is_compatible = match attachment_type {
+                            AttachmentType::Transmitter | AttachmentType::Receiver => has_comm.is_some(),
+                            AttachmentType::Computer => has_control.is_some(),
+                        };
+
+                        if !is_compatible {
+                            continue;
+                        }
+
+                        // Update nearest if this is closer
+                        if nearest_equipment.is_none() || distance < nearest_equipment.as_ref().unwrap().2 {
+                            nearest_equipment = Some((equipment_entity, equipment_sprite.equipment_id, distance, equipment_pos));
+                        }
+                    }
+
+                    // If we found compatible equipment, attach to it
+                    if let Some((equipment_entity, equipment_id, _distance, equipment_pos)) = nearest_equipment {
+                        // Calculate offset from parent
+                        let offset = attachment_pos - equipment_pos;
+
+                        // Set parent relationship and update transform to be relative
+                        commands.entity(attachment_entity)
+                            .insert((
+                                ChildOf(equipment_entity),
+                                Transform::from_translation(offset.extend(1.0))
+                            ));
+
+                        // Change state to Attached
+                        commands.entity(attachment_entity).insert(
+                            super::AttachmentState::AttachedToEquipment {
+                                parent: equipment_entity,
+                            }
+                        );
+
+                        // Update attachment manager
+                        if let Some(attachment_info) = attachment_manager
+                            .attachments
+                            .iter_mut()
+                            .find(|a| a.id == attachment_sprite.attachment_id)
+                        {
+                            attachment_info.parent_equipment_id = Some(equipment_id);
+                            attachment_info.offset_from_parent = offset;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// System to detach selected attachments with 'X' key (supports multi-selection)
 pub fn detach_selected_attachment(
     keyboard: Res<ButtonInput<KeyCode>>,
     selected: Res<SelectedEquipment>,
+    mut commands: Commands,
     mut attachment_manager: ResMut<super::AttachmentManager>,
-    mut attachment_query: Query<(&Transform, &mut super::AttachmentState, &super::AttachmentSprite)>,
+    attachment_query: Query<(Entity, &GlobalTransform, &super::AttachmentState, &super::AttachmentSprite)>,
 ) {
     // Only process on 'X' key press
     if !keyboard.just_pressed(KeyCode::KeyX) {
@@ -888,17 +1007,22 @@ pub fn detach_selected_attachment(
     }
 
     // Detach all selected attachments
-    for (transform, mut attachment_state, attachment_sprite) in &mut attachment_query {
+    for (entity, global_transform, attachment_state, attachment_sprite) in &attachment_query {
         if selected.selected_ids.contains(&attachment_sprite.attachment_id) {
             // Check if it's currently attached
             if matches!(*attachment_state, super::AttachmentState::AttachedToEquipment { .. }) {
-                // Get current position
-                let current_pos = transform.translation.truncate();
+                // Get current global position
+                let current_pos = global_transform.translation().truncate();
+
+                // Remove parent relationship and set new global transform
+                commands.entity(entity)
+                    .remove::<ChildOf>()
+                    .insert(Transform::from_translation(current_pos.extend(2.0)));
 
                 // Change state to Detached
-                *attachment_state = super::AttachmentState::Detached {
+                commands.entity(entity).insert(super::AttachmentState::Detached {
                     position: current_pos,
-                };
+                });
 
                 // Update attachment manager to remove parent
                 if let Some(attachment_info) = attachment_manager
@@ -943,34 +1067,12 @@ pub fn sync_outliner_selection(
     }
 }
 
-/// System to update attachment positions to follow their parent equipment
-pub fn update_attachment_positions(
-    attachment_manager: Res<super::AttachmentManager>,
-    equipment_query: Query<(&Transform, &EquipmentSprite)>,
-    mut attachment_query: Query<(&mut Transform, &super::AttachmentSprite), Without<EquipmentSprite>>,
-) {
-    // For each attachment
-    for (mut attachment_transform, attachment_sprite) in &mut attachment_query {
-        // Find the attachment info to get the parent equipment ID and offset
-        if let Some(attachment_info) = attachment_manager
-            .attachments
-            .iter()
-            .find(|a| a.id == attachment_sprite.attachment_id)
-        {
-            // If this attachment has a parent
-            if let Some(parent_id) = attachment_info.parent_equipment_id {
-                // Find the parent equipment entity
-                for (equipment_transform, equipment_sprite) in &equipment_query {
-                    if equipment_sprite.equipment_id == parent_id {
-                        // Update attachment position: parent position + stored offset
-                        let new_position = equipment_transform.translation.truncate() + attachment_info.offset_from_parent;
-                        attachment_transform.translation = new_position.extend(2.0);
-                        break;
-                    }
-                }
-            }
-        }
-    }
+/// System to update attachment positions - no longer needed!
+/// Attachments are now children of equipment entities, so they automatically follow
+/// their parent via Bevy's transform propagation system. This eliminates the lag.
+pub fn update_attachment_positions() {
+    // This system is kept for backwards compatibility but does nothing.
+    // Child entities automatically follow their parent transforms.
 }
 
 /// System for equipment to mine nearby cells
