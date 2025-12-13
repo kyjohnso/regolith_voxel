@@ -609,15 +609,6 @@ pub fn spawn_attachments(
                 parent_equipment_id: event.parent_equipment_id,
                 offset_from_parent,
             });
-
-            println!(
-                "Spawned {} at position ({}, {}) with offset ({}, {})",
-                event.attachment_type.name(),
-                event.position.x,
-                event.position.y,
-                offset_from_parent.x,
-                offset_from_parent.y
-            );
         }
     }
 }
@@ -665,10 +656,8 @@ pub fn click_select_equipment(
         let is_over_area = ctx.is_pointer_over_area();
 
         if wants_pointer || is_over_area {
-            println!("Click ignored - egui wants pointer: {}, is over area: {}", wants_pointer, is_over_area);
             return;
         }
-        println!("Processing click - egui doesn't want pointer");
 
         let Ok(window) = windows.single() else {
             return;
@@ -720,12 +709,6 @@ pub fn click_select_equipment(
 
         // Update selection in both resources
         selected.selected_id = clicked_id;
-
-        if let Some(id) = clicked_id {
-            println!("Selected equipment/attachment with ID: {}", id);
-        } else {
-            println!("Deselected (clicked empty space)");
-        }
 
         // Clear previous selection and set new one in equipment_actions
         equipment_actions.selected.clear();
@@ -883,8 +866,6 @@ pub fn delete_selected_attachment(
 
             // Despawn the entity
             commands.entity(entity).despawn();
-
-            println!("Deleted attachment #{}", selected_id);
             break;
         }
     }

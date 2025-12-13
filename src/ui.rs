@@ -163,11 +163,8 @@ pub fn ui_system(
                     })
                     .unwrap_or(Vec2::ZERO);
 
-                println!("Selected equipment {} at position: {:?}", selected_id, selected_pos);
-
                 ui.horizontal(|ui| {
                     if ui.button("+ Transmitter").clicked() {
-                        println!("UI: Transmitter button clicked, sending spawn event at {:?}", selected_pos);
                         spawn_attachment_events.write(SpawnAttachmentEvent {
                             attachment_type: AttachmentType::Transmitter,
                             position: selected_pos,
@@ -178,7 +175,6 @@ pub fn ui_system(
 
                 ui.horizontal(|ui| {
                     if ui.button("+ Receiver").clicked() {
-                        println!("UI: Receiver button clicked, sending spawn event at {:?}", selected_pos + Vec2::new(40.0, 0.0));
                         spawn_attachment_events.write(SpawnAttachmentEvent {
                             attachment_type: AttachmentType::Receiver,
                             position: selected_pos + Vec2::new(40.0, 0.0),
@@ -189,7 +185,6 @@ pub fn ui_system(
 
                 ui.horizontal(|ui| {
                     if ui.button("+ Computer").clicked() {
-                        println!("UI: Computer button clicked, sending spawn event at {:?}", selected_pos + Vec2::new(0.0, 40.0));
                         spawn_attachment_events.write(SpawnAttachmentEvent {
                             attachment_type: AttachmentType::Computer,
                             position: selected_pos + Vec2::new(0.0, 40.0),
