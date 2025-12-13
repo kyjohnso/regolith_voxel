@@ -80,6 +80,7 @@ pub struct MinerBody {
     pub extraction_rate: f32,           // How much material extracted per operation
     pub inventory: std::collections::HashMap<crate::scene::MineralType, f32>, // Current inventory
     pub capacity: f32,                  // Maximum inventory capacity in kg
+    pub current_radius: f32,            // Current radius for surface mining expansion
 }
 
 impl MinerBody {
@@ -87,11 +88,12 @@ impl MinerBody {
     pub fn surface_miner() -> Self {
         Self {
             equipment_type: EquipmentType::SurfaceMining,
-            depth_range: (0.0, 20.0),
-            mining_radius: 8.0,
-            extraction_rate: 1.0,
+            depth_range: (0.0, 1000.0), // Works on all heights
+            mining_radius: 3.0, // Starting radius (expands with each press)
+            extraction_rate: 0.1, // Balanced for ~25-40 M presses to fill
             inventory: std::collections::HashMap::new(),
             capacity: 500.0, // 500 kg capacity for surface miner
+            current_radius: 3.0, // Start at initial radius
         }
     }
 
@@ -99,11 +101,12 @@ impl MinerBody {
     pub fn deep_miner() -> Self {
         Self {
             equipment_type: EquipmentType::DeepMining,
-            depth_range: (50.0, 200.0),
-            mining_radius: 5.0,
-            extraction_rate: 2.0,
+            depth_range: (0.0, 1000.0), // Works on all heights
+            mining_radius: 2.0, // Small focused area
+            extraction_rate: 0.05, // Balanced for ~20-30 M presses to fill
             inventory: std::collections::HashMap::new(),
             capacity: 300.0, // 300 kg capacity for deep miner (smaller but more valuable)
+            current_radius: 2.0, // Fixed radius for deep mining
         }
     }
 

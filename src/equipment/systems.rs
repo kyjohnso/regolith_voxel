@@ -1172,8 +1172,22 @@ pub fn equipment_mining_system(
 
         println!("Map coordinates: x={}, y={}", map_x, map_y);
 
-        // Use mining radius from the miner body
-        let mining_radius = miner_body.mining_radius as i32;
+        // Determine mining behavior based on equipment type
+        let (mining_radius, layers_to_dig) = match miner_body.equipment_type {
+            EquipmentType::SurfaceMining => {
+                // Surface miner: expands radius, digs 1 layer
+                let radius = miner_body.current_radius as i32;
+                println!("Surface miner - mining at radius {} (expanding)", radius);
+                (radius, 1)
+            },
+            EquipmentType::DeepMining => {
+                // Deep miner: fixed small radius, digs 3 layers
+                let radius = miner_body.current_radius as i32;
+                println!("Deep miner - mining at radius {} (digging {} layers deep)", radius, 3);
+                (radius, 3)
+            },
+            _ => (miner_body.mining_radius as i32, 1),
+        };
 
         let mut cells_mined = 0;
         let mut cells_out_of_range = 0;
@@ -1207,8 +1221,8 @@ pub fn equipment_mining_system(
                         continue;
                     };
 
-                    // Calculate extraction amount (mass in kg)
-                    let extraction_amount = miner_body.extraction_rate * 5.0;
+                    // Calculate extraction amount (mass in kg) based on layers
+                    let extraction_amount = miner_body.extraction_rate * 5.0 * layers_to_dig as f32;
 
                     // Check if we have capacity to store it
                     if !miner_body.can_add(extraction_amount) {
@@ -1222,9 +1236,9 @@ pub fn equipment_mining_system(
                     let amount_added = miner_body.add_to_inventory(mineral_type, extraction_amount);
                     *minerals_extracted.entry(mineral_type).or_insert(0.0) += amount_added;
 
-                    // Gradually reduce height by mining using extraction rate
+                    // Reduce height by mining - more layers = deeper digging
                     mineral_map.heightmap[idx] =
-                        (mineral_map.heightmap[idx] - miner_body.extraction_rate * 5.0).max(0.0);
+                        (mineral_map.heightmap[idx] - miner_body.extraction_rate * 5.0 * layers_to_dig as f32).max(0.0);
 
                     // If height is depleted, remove the material
                     if mineral_map.heightmap[idx] <= 0.5 {
@@ -1266,6 +1280,12 @@ pub fn equipment_mining_system(
 
         if capacity_reached {
             println!("WARNING: Inventory full! Cannot mine more.");
+        }
+
+        // Expand radius for surface miners
+        if miner_body.equipment_type == EquipmentType::SurfaceMining {
+            miner_body.current_radius += miner_body.mining_radius;
+            println!("Surface miner radius expanded to {:.1}", miner_body.current_radius);
         }
     }
 }
