@@ -163,31 +163,26 @@ pub fn ui_system(
                     })
                     .unwrap_or(Vec2::ZERO);
 
+                // Attachment buttons - system will handle standard offsets automatically
                 ui.horizontal(|ui| {
                     if ui.button("+ Transmitter").clicked() {
                         spawn_attachment_events.write(SpawnAttachmentEvent {
                             attachment_type: AttachmentType::Transmitter,
-                            position: selected_pos,
+                            position: selected_pos, // System adds standard offset
                             parent_equipment_id: Some(selected_id),
                         });
                     }
-                });
-
-                ui.horizontal(|ui| {
                     if ui.button("+ Receiver").clicked() {
                         spawn_attachment_events.write(SpawnAttachmentEvent {
                             attachment_type: AttachmentType::Receiver,
-                            position: selected_pos + Vec2::new(40.0, 0.0),
+                            position: selected_pos, // System adds standard offset
                             parent_equipment_id: Some(selected_id),
                         });
                     }
-                });
-
-                ui.horizontal(|ui| {
                     if ui.button("+ Computer").clicked() {
                         spawn_attachment_events.write(SpawnAttachmentEvent {
                             attachment_type: AttachmentType::Computer,
-                            position: selected_pos + Vec2::new(0.0, 40.0),
+                            position: selected_pos, // System adds standard offset
                             parent_equipment_id: Some(selected_id),
                         });
                     }

@@ -7,7 +7,8 @@ mod systems;
 
 pub use types::{
     EquipmentType, EquipmentPiece, AttachmentState, MinerBody, SamplerBody, SmelterBody, TransportBody,
-    Transmitter, Receiver, Computer, AttachmentType
+    Transmitter, Receiver, Computer, AttachmentType,
+    HasCommunicationMount, HasControlMount, HasUtilityMount
 };
 pub use tree::{
     EquipmentTreeNode, EquipmentTreeState, EquipmentTreeActions, SelectedEquipment,

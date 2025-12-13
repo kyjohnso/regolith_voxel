@@ -523,6 +523,13 @@ pub fn spawn_equipment_sprites(
                             entity_commands.insert(TransportBody::default());
                         }
                     }
+
+                    // All equipment has mount points for attachments
+                    entity_commands.insert((
+                        super::HasCommunicationMount,
+                        super::HasControlMount,
+                        super::HasUtilityMount,
+                    ));
                 }
             }
         }
@@ -545,7 +552,7 @@ pub fn spawn_attachments(
     mut attachment_manager: ResMut<super::AttachmentManager>,
     attachment_sprites: Res<super::AttachmentSprites>,
     mut spawn_events: EventReader<super::SpawnAttachmentEvent>,
-    equipment_query: Query<(&Transform, &EquipmentSprite)>,
+    equipment_query: Query<(Entity, &Transform, &EquipmentSprite)>,
 ) {
     use super::{AttachmentInfo, AttachmentSprite, AttachmentType, Computer, Receiver, Transmitter};
 
@@ -553,24 +560,29 @@ pub fn spawn_attachments(
         let attachment_id = attachment_manager.next_id;
         attachment_manager.next_id += 1;
 
-        // Calculate offset from parent equipment
-        let offset_from_parent = if let Some(parent_id) = event.parent_equipment_id {
-            // Find parent equipment position
-            let parent_pos = equipment_query
+        // Use standard offset based on attachment type
+        let offset_from_parent = event.attachment_type.standard_offset();
+
+        // Find parent equipment entity and position
+        let (parent_entity, spawn_position, attachment_state) = if let Some(parent_id) = event.parent_equipment_id {
+            equipment_query
                 .iter()
-                .find_map(|(transform, sprite)| {
+                .find_map(|(entity, transform, sprite)| {
                     if sprite.equipment_id == parent_id {
-                        Some(transform.translation.truncate())
+                        let parent_pos = transform.translation.truncate();
+                        let spawn_pos = parent_pos + offset_from_parent;
+                        Some((
+                            Some(entity),
+                            spawn_pos,
+                            super::AttachmentState::AttachedToEquipment { parent: entity },
+                        ))
                     } else {
                         None
                     }
                 })
-                .unwrap_or(Vec2::ZERO);
-
-            // Calculate offset: attachment position - parent position
-            event.position - parent_pos
+                .unwrap_or((None, event.position, super::AttachmentState::Detached { position: event.position }))
         } else {
-            Vec2::ZERO
+            (None, event.position, super::AttachmentState::Detached { position: event.position })
         };
 
         // Get the appropriate sprite
@@ -578,15 +590,12 @@ pub fn spawn_attachments(
             // Create the attachment entity
             let mut entity_commands = commands.spawn((
                 Sprite::from_image(sprite_handle.clone()),
-                Transform::from_translation(event.position.extend(2.0)), // Higher z to appear above equipment
+                Transform::from_translation(spawn_position.extend(2.0)), // Higher z to appear above equipment
                 AttachmentSprite {
                     attachment_id,
                     attachment_type: event.attachment_type,
                 },
-                // Start detached
-                super::AttachmentState::Detached {
-                    position: event.position,
-                },
+                attachment_state,
             ));
 
             // Add the specific attachment component
