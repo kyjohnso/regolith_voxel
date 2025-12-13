@@ -21,6 +21,9 @@ pub fn ui_system(
     equipment_query: Query<(&Transform, &crate::equipment::EquipmentSprite)>,
     attachment_query: Query<(&crate::equipment::AttachmentState, &crate::equipment::AttachmentSprite)>,
     miner_query: Query<(&crate::equipment::EquipmentSprite, &crate::equipment::MinerBody)>,
+    truck_query: Query<(&crate::equipment::EquipmentSprite, &crate::equipment::TransportBody)>,
+    cargo_item_query: Query<&crate::equipment::EquipmentSprite>,
+    cargo_attachment_query: Query<&crate::equipment::AttachmentSprite>,
 ) {
     let ctx = contexts.ctx_mut();
 
@@ -29,7 +32,7 @@ pub fn ui_system(
         ui.horizontal(|ui| {
             ui.label("Regolith Voxel - Mining Operations");
             ui.separator();
-            ui.label("WASD: Pan | Q/E: Zoom | Click: Select | Arrows: Move | M: Mine | T: Attach | X: Detach");
+            ui.label("WASD: Pan | Q/E: Zoom | Click: Select | Arrows: Move | M: Mine | T: Attach | X: Detach | L: Load | U: Unload");
 
             if !selected.selected_ids.is_empty() {
                 ui.separator();
@@ -347,6 +350,57 @@ pub fn ui_system(
                                     );
                                     ui.label(format!("{:?}: {:.1} kg", mineral_type, amount));
                                 });
+                            }
+                        } else {
+                            ui.label("Empty");
+                        }
+
+                        ui.add_space(5.0);
+                    }
+
+                    ui.add_space(5.0);
+                    ui.separator();
+                }
+            }
+
+            // Show cargo for selected trucks
+            if !selected.selected_ids.is_empty() {
+                // Find trucks in the selection
+                let selected_trucks: Vec<_> = selected.selected_ids
+                    .iter()
+                    .filter_map(|id| {
+                        truck_query.iter().find_map(|(sprite, transport)| {
+                            if sprite.equipment_id == *id {
+                                Some((*id, transport))
+                            } else {
+                                None
+                            }
+                        })
+                    })
+                    .collect();
+
+                if !selected_trucks.is_empty() {
+                    ui.heading("Truck Cargo");
+                    ui.separator();
+
+                    for (truck_id, transport) in selected_trucks.iter() {
+                        ui.label(format!("Truck #{} - Cargo: {}/{} items",
+                            truck_id,
+                            transport.cargo.len(),
+                            10  // TODO: make this configurable
+                        ));
+
+                        if !transport.cargo.is_empty() {
+                            ui.label("Contents:");
+                            for (idx, cargo_entity) in transport.cargo.iter().enumerate() {
+                                // Try to identify what's in cargo
+                                if let Ok(equipment_sprite) = cargo_item_query.get(*cargo_entity) {
+                                    ui.label(format!("  {}. Equipment #{}", idx + 1, equipment_sprite.equipment_id));
+                                } else if let Ok(attachment_sprite) = cargo_attachment_query.get(*cargo_entity) {
+                                    ui.label(format!("  {}. Attachment #{}", idx + 1, attachment_sprite.attachment_id));
+                                } else {
+                                    ui.label(format!("  {}. Unknown item", idx + 1));
+                                }
                             }
                         } else {
                             ui.label("Empty");

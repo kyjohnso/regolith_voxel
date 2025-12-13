@@ -1289,3 +1289,168 @@ pub fn equipment_mining_system(
         }
     }
 }
+
+/// System to load nearby detached equipment and attachments into selected truck
+pub fn load_into_truck(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    selected: Res<SelectedEquipment>,
+    mut commands: Commands,
+    mut truck_query: Query<(Entity, &Transform, &EquipmentSprite, &mut TransportBody)>,
+    attachment_query: Query<(Entity, &GlobalTransform, &super::AttachmentSprite, &super::AttachmentState), Without<EquipmentSprite>>,
+    equipment_query: Query<(Entity, &GlobalTransform, &EquipmentSprite, &super::AttachmentState), Without<super::AttachmentSprite>>,
+) {
+    // Press L to load
+    if !keyboard.just_pressed(KeyCode::KeyL) {
+        return;
+    }
+
+    println!("L key pressed - checking for loadable items...");
+
+    // Iterate through trucks directly
+    for (truck_entity, transform, truck_sprite, mut transport) in truck_query.iter_mut() {
+        // Check if this truck is selected
+        if !selected.selected_ids.contains(&truck_sprite.equipment_id) {
+            continue;
+        }
+
+        let truck_pos = transform.translation.truncate();
+        let load_radius = 50.0; // Load range
+        let max_cargo_items = 10; // Maximum items that can be carried
+        let mut loaded = false;
+
+        // Check if truck is already at capacity
+        if transport.cargo.len() >= max_cargo_items {
+            println!("Truck {} is at full capacity ({}/{} items)", truck_sprite.equipment_id, transport.cargo.len(), max_cargo_items);
+            continue;
+        }
+
+        // Find nearby detached attachments
+        for (entity, global_transform, attachment_sprite, attachment_state) in attachment_query.iter() {
+            // Only load detached items
+            if !matches!(attachment_state, AttachmentState::Detached { .. }) {
+                continue;
+            }
+
+            let item_pos = global_transform.translation().truncate();
+            let distance = truck_pos.distance(item_pos);
+
+            if distance <= load_radius {
+                println!("Loading attachment {} into truck {}", attachment_sprite.attachment_id, truck_sprite.equipment_id);
+
+                // Add to cargo
+                transport.cargo.push(entity);
+
+                // Update state to InCargo
+                let cargo_index = transport.cargo.len() - 1;
+                commands.entity(entity).insert(AttachmentState::InCargo {
+                    truck: truck_entity,
+                    cargo_index,
+                });
+
+                loaded = true;
+                break; // Load one at a time per truck
+            }
+        }
+
+        // If didn't load an attachment, try loading equipment
+        if !loaded {
+            for (entity, global_transform, equipment_sprite, equipment_state) in equipment_query.iter() {
+                // Don't load the truck itself or other trucks
+                if equipment_sprite.equipment_id == truck_sprite.equipment_id {
+                    continue;
+                }
+
+                // Only load detached items
+                if !matches!(equipment_state, AttachmentState::Detached { .. }) {
+                    continue;
+                }
+
+                let item_pos = global_transform.translation().truncate();
+                let distance = truck_pos.distance(item_pos);
+
+                if distance <= load_radius {
+                    println!("Loading equipment {} into truck {}", equipment_sprite.equipment_id, truck_sprite.equipment_id);
+
+                    // Add to cargo
+                    transport.cargo.push(entity);
+
+                    // Update state to InCargo
+                    let cargo_index = transport.cargo.len() - 1;
+                    commands.entity(entity).insert(AttachmentState::InCargo {
+                        truck: truck_entity,
+                        cargo_index,
+                    });
+
+                    break; // Load one at a time per truck
+                }
+            }
+        }
+    }
+}
+
+/// System to unload cargo from selected truck
+pub fn unload_from_truck(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    selected: Res<SelectedEquipment>,
+    mut commands: Commands,
+    mut truck_query: Query<(&Transform, &EquipmentSprite, &mut TransportBody)>,
+) {
+    // Press U to unload
+    if !keyboard.just_pressed(KeyCode::KeyU) {
+        return;
+    }
+
+    // Find selected trucks
+    for id in &selected.selected_ids {
+        if let Some((transform, _sprite, mut transport)) = truck_query.iter_mut().find_map(|(t, s, trans)| {
+            if s.equipment_id == *id {
+                Some((t, s, trans))
+            } else {
+                None
+            }
+        }) {
+            if transport.cargo.is_empty() {
+                println!("Truck {} has no cargo to unload", id);
+                continue;
+            }
+
+            // Unload most recent cargo
+            if let Some(cargo_entity) = transport.cargo.pop() {
+                let truck_pos = transform.translation.truncate();
+                println!("Unloading cargo from truck {}", id);
+
+                // Update state to Detached at truck's position
+                commands.entity(cargo_entity).insert(AttachmentState::Detached {
+                    position: truck_pos,
+                });
+
+                // Update transform and restore full opacity
+                commands.entity(cargo_entity).insert((
+                    Transform::from_translation(truck_pos.extend(2.0)),
+                    Visibility::Visible,
+                ));
+            }
+        }
+    }
+}
+
+/// System to update visual appearance of cargo items (transparency and positioning)
+pub fn update_cargo_visuals(
+    truck_query: Query<(&Transform, &TransportBody)>,
+    mut cargo_query: Query<(&mut Transform, &mut Visibility, &AttachmentState), Without<TransportBody>>,
+) {
+    // Update all cargo items
+    for (mut cargo_transform, mut visibility, attachment_state) in cargo_query.iter_mut() {
+        if let AttachmentState::InCargo { truck, cargo_index } = attachment_state {
+            // Find the truck
+            if let Ok((truck_transform, _transport)) = truck_query.get(*truck) {
+                // Position cargo under truck with slight offset based on cargo index
+                let offset = Vec2::new(0.0, -10.0 * (*cargo_index as f32 + 1.0));
+                let cargo_pos = truck_transform.translation.truncate() + offset;
+
+                cargo_transform.translation = cargo_pos.extend(0.5); // Lower z-index
+                *visibility = Visibility::Hidden; // Hide cargo when in truck
+            }
+        }
+    }
+}

@@ -31,4 +31,7 @@ pub use systems::{
     attach_selected_attachment,
     detach_selected_attachment,
     equipment_mining_system,
+    load_into_truck,
+    unload_from_truck,
+    update_cargo_visuals,
 };

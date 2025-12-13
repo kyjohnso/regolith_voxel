@@ -176,7 +176,8 @@ impl Default for SmelterBody {
 #[derive(Component, Debug, Clone)]
 pub struct TransportBody {
     pub speed: f32,            // Movement speed multiplier
-    pub cargo_capacity: f32,   // Maximum cargo weight
+    pub cargo_capacity: f32,   // Maximum cargo weight in kg
+    pub cargo: Vec<Entity>,    // Entities being transported
 }
 
 impl Default for TransportBody {
@@ -184,6 +185,18 @@ impl Default for TransportBody {
         Self {
             speed: 1.5,
             cargo_capacity: 1000.0,
+            cargo: Vec::new(),
+        }
+    }
+}
+
+impl TransportBody {
+    /// Create a new truck with specified parameters
+    pub fn truck() -> Self {
+        Self {
+            speed: 2.0, // Faster than miners
+            cargo_capacity: 1500.0, // Large cargo capacity
+            cargo: Vec::new(),
         }
     }
 }
