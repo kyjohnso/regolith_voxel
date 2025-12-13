@@ -18,7 +18,7 @@ use equipment::{
     move_selected_equipment, spawn_equipment_sprites, spawn_attachments, update_equipment_positions,
     update_attachment_positions, sync_outliner_selection, update_selection_sprites, delete_selected_attachment,
     attach_selected_attachment, detach_selected_attachment, EquipmentTreeActions, EquipmentTreeState, SelectedEquipment,
-    AttachmentManager, SpawnAttachmentEvent,
+    AttachmentManager, SpawnAttachmentEvent, MountPointOccupancy,
 };
 use scene::{
     cellular_automata_system, update_mineral_map_texture, CellularAutomataTimer, MineralMap,
@@ -48,6 +48,7 @@ fn main() {
         .init_resource::<EquipmentTreeActions>()
         .init_resource::<SelectedEquipment>()
         .init_resource::<AttachmentManager>()
+        .init_resource::<MountPointOccupancy>()
         // Events
         .add_event::<SpawnAttachmentEvent>()
         // Systems

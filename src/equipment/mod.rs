@@ -12,7 +12,8 @@ pub use types::{
 };
 pub use tree::{
     EquipmentTreeNode, EquipmentTreeState, EquipmentTreeActions, SelectedEquipment,
-    AttachmentManager, AttachmentInfo, SpawnAttachmentEvent
+    AttachmentManager, AttachmentInfo, SpawnAttachmentEvent,
+    MountPointOccupancy, MountState, MountType
 };
 pub use sprites::{EquipmentSprites, EquipmentSprite, AttachmentSprites, AttachmentSprite};
 pub use systems::{
