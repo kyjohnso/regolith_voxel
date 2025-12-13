@@ -1136,7 +1136,7 @@ pub fn update_attachment_positions() {
 /// System for equipment to mine nearby cells
 pub fn equipment_mining_system(
     keyboard: Res<ButtonInput<KeyCode>>,
-    sprite_query: Query<(&Transform, &EquipmentSprite, &MinerBody)>,
+    mut sprite_query: Query<(&Transform, &EquipmentSprite, &mut MinerBody)>,
     mut mineral_map: ResMut<MineralMap>,
 ) {
     // Press M to mine with active equipment
@@ -1147,7 +1147,7 @@ pub fn equipment_mining_system(
     println!("M key pressed - checking for mining equipment...");
 
     // Find all active mining equipment with MinerBody component
-    for (transform, _equipment_sprite, miner_body) in sprite_query.iter() {
+    for (transform, _equipment_sprite, mut miner_body) in sprite_query.iter_mut() {
         // Get equipment position in world space
         let world_pos = transform.translation.truncate();
 
@@ -1177,6 +1177,8 @@ pub fn equipment_mining_system(
 
         let mut cells_mined = 0;
         let mut cells_out_of_range = 0;
+        let mut minerals_extracted: std::collections::HashMap<MineralType, f32> = std::collections::HashMap::new();
+        let mut capacity_reached = false;
 
         for dy in -mining_radius..=mining_radius {
             for dx in -mining_radius..=mining_radius {
@@ -1195,7 +1197,30 @@ pub fn equipment_mining_system(
                         continue; // Skip cells outside depth range
                     }
 
+                    // Get the mineral type before mining
+                    let mineral_type = if let Some(cell) = mineral_map.get(x as usize, y as usize) {
+                        if cell.mineral_type == MineralType::Empty {
+                            continue; // Skip empty cells
+                        }
+                        cell.mineral_type
+                    } else {
+                        continue;
+                    };
+
+                    // Calculate extraction amount (mass in kg)
+                    let extraction_amount = miner_body.extraction_rate * 5.0;
+
+                    // Check if we have capacity to store it
+                    if !miner_body.can_add(extraction_amount) {
+                        capacity_reached = true;
+                        break; // Stop mining when full
+                    }
+
                     cells_mined += 1;
+
+                    // Add to inventory
+                    let amount_added = miner_body.add_to_inventory(mineral_type, extraction_amount);
+                    *minerals_extracted.entry(mineral_type).or_insert(0.0) += amount_added;
 
                     // Gradually reduce height by mining using extraction rate
                     mineral_map.heightmap[idx] =
@@ -1212,11 +1237,35 @@ pub fn equipment_mining_system(
                     }
                 }
             }
+            if capacity_reached {
+                break;
+            }
         }
 
+        // Print mining results
         println!(
-            "Mined {} units, {} units out of depth range ({:.0}-{:.0})",
+            "Mined {} cells, {} cells out of depth range ({:.0}-{:.0})",
             cells_mined, cells_out_of_range, miner_body.depth_range.0, miner_body.depth_range.1
         );
+
+        // Print extracted minerals
+        if !minerals_extracted.is_empty() {
+            println!("Extracted minerals:");
+            for (mineral_type, amount) in minerals_extracted.iter() {
+                println!("  {:?}: {:.1} kg", mineral_type, amount);
+            }
+        }
+
+        // Print inventory status
+        println!(
+            "Inventory: {:.1}/{:.1} kg ({:.1}% full)",
+            miner_body.current_inventory_mass(),
+            miner_body.capacity,
+            (miner_body.current_inventory_mass() / miner_body.capacity) * 100.0
+        );
+
+        if capacity_reached {
+            println!("WARNING: Inventory full! Cannot mine more.");
+        }
     }
 }

@@ -6,7 +6,7 @@ use egui_arbor::Outliner;
 
 use crate::equipment::{
     EquipmentTreeActions, EquipmentTreeNode, EquipmentTreeState, EquipmentType, SelectedEquipment,
-    AttachmentType, SpawnAttachmentEvent,
+    AttachmentType, SpawnAttachmentEvent, MinerBody,
 };
 use crate::scene::ViewMode;
 
@@ -20,6 +20,7 @@ pub fn ui_system(
     mut spawn_attachment_events: EventWriter<SpawnAttachmentEvent>,
     equipment_query: Query<(&Transform, &crate::equipment::EquipmentSprite)>,
     attachment_query: Query<(&crate::equipment::AttachmentState, &crate::equipment::AttachmentSprite)>,
+    miner_query: Query<(&crate::equipment::EquipmentSprite, &crate::equipment::MinerBody)>,
 ) {
     let ctx = contexts.ctx_mut();
 
@@ -281,6 +282,82 @@ pub fn ui_system(
 
                 ui.add_space(10.0);
                 ui.separator();
+            }
+
+            // Show inventory for selected mining equipment
+            if !selected.selected_ids.is_empty() {
+                // Find miners in the selection
+                let selected_miners: Vec<_> = selected.selected_ids
+                    .iter()
+                    .filter_map(|id| {
+                        miner_query.iter().find_map(|(sprite, miner_body)| {
+                            if sprite.equipment_id == *id {
+                                Some((*id, miner_body))
+                            } else {
+                                None
+                            }
+                        })
+                    })
+                    .collect();
+
+                if !selected_miners.is_empty() {
+                    ui.heading("Inventory");
+                    ui.separator();
+
+                    for (equipment_id, miner_body) in selected_miners.iter() {
+                        // Show equipment name and capacity
+                        let capacity_percent = (miner_body.current_inventory_mass() / miner_body.capacity) * 100.0;
+                        ui.label(format!(
+                            "Unit #{} - {:.1}/{:.1} kg ({:.0}% full)",
+                            equipment_id,
+                            miner_body.current_inventory_mass(),
+                            miner_body.capacity,
+                            capacity_percent
+                        ));
+
+                        // Show capacity bar
+                        let capacity_ratio = miner_body.current_inventory_mass() / miner_body.capacity;
+                        let bar_color = if capacity_ratio > 0.9 {
+                            egui::Color32::RED
+                        } else if capacity_ratio > 0.7 {
+                            egui::Color32::YELLOW
+                        } else {
+                            egui::Color32::GREEN
+                        };
+
+                        ui.add(
+                            egui::ProgressBar::new(capacity_ratio)
+                                .fill(bar_color)
+                                .show_percentage()
+                        );
+
+                        // Show inventory contents
+                        if !miner_body.inventory.is_empty() {
+                            ui.label("Contents:");
+                            for (mineral_type, amount) in miner_body.inventory.iter() {
+                                ui.horizontal(|ui| {
+                                    let color = mineral_type.color();
+                                    ui.colored_label(
+                                        egui::Color32::from_rgb(
+                                            (color.to_srgba().red * 255.0) as u8,
+                                            (color.to_srgba().green * 255.0) as u8,
+                                            (color.to_srgba().blue * 255.0) as u8,
+                                        ),
+                                        "■"
+                                    );
+                                    ui.label(format!("{:?}: {:.1} kg", mineral_type, amount));
+                                });
+                            }
+                        } else {
+                            ui.label("Empty");
+                        }
+
+                        ui.add_space(5.0);
+                    }
+
+                    ui.add_space(5.0);
+                    ui.separator();
+                }
             }
 
             // Show the outliner with the tree

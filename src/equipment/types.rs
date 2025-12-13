@@ -78,6 +78,8 @@ pub struct MinerBody {
     pub depth_range: (f32, f32),        // Min and max depth this miner can work at
     pub mining_radius: f32,             // Radius of mining operation
     pub extraction_rate: f32,           // How much material extracted per operation
+    pub inventory: std::collections::HashMap<crate::scene::MineralType, f32>, // Current inventory
+    pub capacity: f32,                  // Maximum inventory capacity in kg
 }
 
 impl MinerBody {
@@ -88,6 +90,8 @@ impl MinerBody {
             depth_range: (0.0, 20.0),
             mining_radius: 8.0,
             extraction_rate: 1.0,
+            inventory: std::collections::HashMap::new(),
+            capacity: 500.0, // 500 kg capacity for surface miner
         }
     }
 
@@ -98,7 +102,36 @@ impl MinerBody {
             depth_range: (50.0, 200.0),
             mining_radius: 5.0,
             extraction_rate: 2.0,
+            inventory: std::collections::HashMap::new(),
+            capacity: 300.0, // 300 kg capacity for deep miner (smaller but more valuable)
         }
+    }
+
+    /// Get the current total mass of inventory
+    pub fn current_inventory_mass(&self) -> f32 {
+        self.inventory.values().sum()
+    }
+
+    /// Get remaining capacity
+    pub fn remaining_capacity(&self) -> f32 {
+        self.capacity - self.current_inventory_mass()
+    }
+
+    /// Check if can add amount to inventory
+    pub fn can_add(&self, amount: f32) -> bool {
+        self.remaining_capacity() >= amount
+    }
+
+    /// Add mineral to inventory, returns amount actually added
+    pub fn add_to_inventory(&mut self, mineral_type: crate::scene::MineralType, amount: f32) -> f32 {
+        let available_capacity = self.remaining_capacity();
+        let amount_to_add = amount.min(available_capacity);
+
+        if amount_to_add > 0.0 {
+            *self.inventory.entry(mineral_type).or_insert(0.0) += amount_to_add;
+        }
+
+        amount_to_add
     }
 }
 

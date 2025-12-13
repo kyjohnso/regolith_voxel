@@ -9,7 +9,7 @@ use super::physics::PhysicsType;
 use super::{MAP_HEIGHT, MAP_WIDTH};
 
 /// Types of minerals that can be found in the map
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MineralType {
     Empty,    // Black/dark gray - void/air
     Iron,     // Rusty orange
