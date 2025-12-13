@@ -1117,8 +1117,9 @@ pub fn sync_outliner_selection(
     equipment_tree: Res<super::EquipmentTreeState>,
     mut selected: ResMut<SelectedEquipment>,
 ) {
-    // If there's a change in outliner selection, sync it
-    if equipment_actions.is_changed() {
+    // Always check if outliner selection differs from active selection
+    // This ensures container selections properly expand to include children
+    if equipment_actions.selected != selected.selected_ids || equipment_actions.is_changed() {
         // Start with the selected IDs from the outliner
         let mut all_selected_ids = equipment_actions.selected.clone();
 
