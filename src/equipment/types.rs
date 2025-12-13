@@ -228,6 +228,14 @@ impl AttachmentType {
             AttachmentType::Computer => bevy::prelude::Vec2::new(0.0, 25.0),      // Center-top
         }
     }
+
+    /// Get the mount type required for this attachment
+    pub fn mount_type(&self) -> crate::equipment::MountType {
+        match self {
+            AttachmentType::Transmitter | AttachmentType::Receiver => crate::equipment::MountType::Communication,
+            AttachmentType::Computer => crate::equipment::MountType::Control,
+        }
+    }
 }
 
 // Mount point marker components - indicate what types of attachments can be mounted

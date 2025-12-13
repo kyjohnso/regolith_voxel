@@ -432,6 +432,94 @@ pub struct AttachmentInfo {
     pub offset_from_parent: bevy::prelude::Vec2, // Offset from parent equipment position
 }
 
+/// Resource to track mount point occupancy
+#[derive(Resource, Default)]
+pub struct MountPointOccupancy {
+    /// Maps equipment_id -> mount slots
+    pub mounts: std::collections::HashMap<usize, MountState>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct MountState {
+    pub communication_mounts: [Option<usize>; 2], // 2 slots for transmitter/receiver
+    pub control_mounts: [Option<usize>; 2],        // 2 slots for computer
+}
+
+impl MountPointOccupancy {
+    /// Check if a mount point is available on equipment
+    pub fn is_mount_available(&self, equipment_id: usize, mount_type: MountType) -> bool {
+        if let Some(mount_state) = self.mounts.get(&equipment_id) {
+            match mount_type {
+                MountType::Communication => mount_state.communication_mounts.iter().any(|m| m.is_none()),
+                MountType::Control => mount_state.control_mounts.iter().any(|m| m.is_none()),
+            }
+        } else {
+            true // No entry means all mounts are empty
+        }
+    }
+
+    /// Occupy a mount point - finds first available slot
+    pub fn occupy_mount(&mut self, equipment_id: usize, mount_type: MountType, attachment_id: usize) -> bool {
+        let mount_state = self.mounts.entry(equipment_id).or_default();
+        match mount_type {
+            MountType::Communication => {
+                if let Some(slot) = mount_state.communication_mounts.iter_mut().find(|m| m.is_none()) {
+                    *slot = Some(attachment_id);
+                    true
+                } else {
+                    false
+                }
+            }
+            MountType::Control => {
+                if let Some(slot) = mount_state.control_mounts.iter_mut().find(|m| m.is_none()) {
+                    *slot = Some(attachment_id);
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+    }
+
+    /// Free a specific attachment from its mount
+    pub fn free_attachment(&mut self, equipment_id: usize, attachment_id: usize) {
+        if let Some(mount_state) = self.mounts.get_mut(&equipment_id) {
+            // Check communication mounts
+            for slot in &mut mount_state.communication_mounts {
+                if *slot == Some(attachment_id) {
+                    *slot = None;
+                    return;
+                }
+            }
+            // Check control mounts
+            for slot in &mut mount_state.control_mounts {
+                if *slot == Some(attachment_id) {
+                    *slot = None;
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Get count of occupied mounts for a type
+    pub fn occupied_count(&self, equipment_id: usize, mount_type: MountType) -> usize {
+        if let Some(mount_state) = self.mounts.get(&equipment_id) {
+            match mount_type {
+                MountType::Communication => mount_state.communication_mounts.iter().filter(|m| m.is_some()).count(),
+                MountType::Control => mount_state.control_mounts.iter().filter(|m| m.is_some()).count(),
+            }
+        } else {
+            0
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MountType {
+    Communication, // For transmitter/receiver
+    Control,       // For computer
+}
+
 /// Event to request spawning an attachment
 #[derive(bevy::prelude::Event)]
 pub struct SpawnAttachmentEvent {

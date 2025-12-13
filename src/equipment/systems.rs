@@ -550,6 +550,7 @@ pub fn spawn_equipment_sprites(
 pub fn spawn_attachments(
     mut commands: Commands,
     mut attachment_manager: ResMut<super::AttachmentManager>,
+    mut mount_occupancy: ResMut<super::MountPointOccupancy>,
     attachment_sprites: Res<super::AttachmentSprites>,
     mut spawn_events: EventReader<super::SpawnAttachmentEvent>,
     equipment_query: Query<(Entity, &Transform, &EquipmentSprite)>,
@@ -567,6 +568,20 @@ pub fn spawn_attachments(
         if let Some(sprite_handle) = attachment_sprites.normal.get(&event.attachment_type) {
             // Find parent equipment entity if attaching
             if let Some(parent_id) = event.parent_equipment_id {
+                // Check if the mount point is available
+                let mount_type = event.attachment_type.mount_type();
+                if !mount_occupancy.is_mount_available(parent_id, mount_type) {
+                    println!("Cannot attach {}: {} mount point on equipment {} is occupied",
+                        event.attachment_type.name(),
+                        match mount_type {
+                            super::MountType::Communication => "Communication",
+                            super::MountType::Control => "Control",
+                        },
+                        parent_id
+                    );
+                    continue; // Skip this attachment
+                }
+
                 if let Some((parent_entity, _transform, _sprite)) = equipment_query
                     .iter()
                     .find(|(_, _, sprite)| sprite.equipment_id == parent_id)
@@ -596,6 +611,11 @@ pub fn spawn_attachments(
                             }
                         }
                     });
+
+                    // Occupy the mount point (should always succeed since we checked availability)
+                    if !mount_occupancy.occupy_mount(parent_id, mount_type, attachment_id) {
+                        println!("ERROR: Failed to occupy mount after availability check!");
+                    }
 
                     // Track the attachment
                     attachment_manager.attachments.push(AttachmentInfo {
@@ -867,6 +887,7 @@ pub fn delete_selected_attachment(
     keyboard: Res<ButtonInput<KeyCode>>,
     selected: Res<SelectedEquipment>,
     mut attachment_manager: ResMut<super::AttachmentManager>,
+    mut mount_occupancy: ResMut<super::MountPointOccupancy>,
     attachment_query: Query<(Entity, &super::AttachmentSprite)>,
     mut commands: Commands,
 ) {
@@ -882,6 +903,17 @@ pub fn delete_selected_attachment(
     // Find and delete all selected attachment entities
     for (entity, attachment_sprite) in &attachment_query {
         if selected.selected_ids.contains(&attachment_sprite.attachment_id) {
+            // Free the mount point if attached
+            if let Some(attachment_info) = attachment_manager
+                .attachments
+                .iter()
+                .find(|a| a.id == attachment_sprite.attachment_id)
+            {
+                if let Some(parent_id) = attachment_info.parent_equipment_id {
+                    mount_occupancy.free_attachment(parent_id, attachment_sprite.attachment_id);
+                }
+            }
+
             // Remove from attachment manager
             attachment_manager.attachments.retain(|a| a.id != attachment_sprite.attachment_id);
 
@@ -897,6 +929,7 @@ pub fn attach_selected_attachment(
     selected: Res<SelectedEquipment>,
     mut commands: Commands,
     mut attachment_manager: ResMut<super::AttachmentManager>,
+    mut mount_occupancy: ResMut<super::MountPointOccupancy>,
     attachment_query: Query<(Entity, &Transform, &super::AttachmentState, &super::AttachmentSprite)>,
     equipment_query: Query<(Entity, &Transform, &EquipmentSprite, Option<&super::HasCommunicationMount>, Option<&super::HasControlMount>, Option<&super::HasUtilityMount>)>,
 ) {
@@ -956,6 +989,20 @@ pub fn attach_selected_attachment(
 
                     // If we found compatible equipment, attach to it
                     if let Some((equipment_entity, equipment_id, _distance, equipment_pos)) = nearest_equipment {
+                        // Check if the mount point is available
+                        let mount_type = attachment_type.mount_type();
+                        if !mount_occupancy.is_mount_available(equipment_id, mount_type) {
+                            println!("Cannot attach {}: {} mount point on equipment {} is occupied",
+                                attachment_type.name(),
+                                match mount_type {
+                                    super::MountType::Communication => "Communication",
+                                    super::MountType::Control => "Control",
+                                },
+                                equipment_id
+                            );
+                            continue; // Skip this attachment
+                        }
+
                         // Calculate offset from parent
                         let offset = attachment_pos - equipment_pos;
 
@@ -972,6 +1019,11 @@ pub fn attach_selected_attachment(
                                 parent: equipment_entity,
                             }
                         );
+
+                        // Occupy the mount point (should always succeed since we checked availability)
+                        if !mount_occupancy.occupy_mount(equipment_id, mount_type, attachment_sprite.attachment_id) {
+                            println!("ERROR: Failed to occupy mount after availability check!");
+                        }
 
                         // Update attachment manager
                         if let Some(attachment_info) = attachment_manager
@@ -995,6 +1047,7 @@ pub fn detach_selected_attachment(
     selected: Res<SelectedEquipment>,
     mut commands: Commands,
     mut attachment_manager: ResMut<super::AttachmentManager>,
+    mut mount_occupancy: ResMut<super::MountPointOccupancy>,
     attachment_query: Query<(Entity, &GlobalTransform, &super::AttachmentState, &super::AttachmentSprite)>,
 ) {
     // Only process on 'X' key press
@@ -1024,12 +1077,17 @@ pub fn detach_selected_attachment(
                     position: current_pos,
                 });
 
-                // Update attachment manager to remove parent
+                // Update attachment manager to remove parent and free mount
                 if let Some(attachment_info) = attachment_manager
                     .attachments
                     .iter_mut()
                     .find(|a| a.id == attachment_sprite.attachment_id)
                 {
+                    // Free the mount point before clearing parent
+                    if let Some(parent_id) = attachment_info.parent_equipment_id {
+                        mount_occupancy.free_attachment(parent_id, attachment_sprite.attachment_id);
+                    }
+
                     attachment_info.parent_equipment_id = None;
                 }
             }
