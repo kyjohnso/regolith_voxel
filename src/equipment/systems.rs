@@ -914,14 +914,32 @@ pub fn detach_selected_attachment(
 }
 
 /// System to sync outliner selection to SelectedEquipment resource
+/// When a container is selected, all its children are also selected
 pub fn sync_outliner_selection(
     equipment_actions: Res<EquipmentTreeActions>,
+    equipment_tree: Res<super::EquipmentTreeState>,
     mut selected: ResMut<SelectedEquipment>,
 ) {
     // If there's a change in outliner selection, sync it
     if equipment_actions.is_changed() {
-        // Copy all selected IDs from the outliner
-        selected.selected_ids = equipment_actions.selected.clone();
+        // Start with the selected IDs from the outliner
+        let mut all_selected_ids = equipment_actions.selected.clone();
+
+        // For each selected ID, if it's a container, add all its descendants
+        for selected_id in equipment_actions.selected.iter() {
+            // Find the node in the tree
+            for root in &equipment_tree.nodes {
+                if let Some(node) = root.find_node(*selected_id) {
+                    // If this node is a container, collect all its descendants
+                    if node.is_container() {
+                        node.collect_all_descendant_ids(&mut all_selected_ids);
+                    }
+                    break;
+                }
+            }
+        }
+
+        selected.selected_ids = all_selected_ids;
     }
 }
 
