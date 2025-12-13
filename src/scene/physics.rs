@@ -157,7 +157,7 @@ pub fn update_mineral_map_texture(
     mut images: ResMut<Assets<Image>>,
     query: Query<&Sprite, With<MineralMapRenderer>>,
 ) {
-    // Only update if the mineral map or view mode changed
+    // Always update when mineral map changes, or when view mode changes
     if !mineral_map.is_changed() && !view_mode.is_changed() {
         return;
     }
@@ -166,45 +166,49 @@ pub fn update_mineral_map_texture(
     for sprite in query.iter() {
         if let Some(image) = images.get_mut(&sprite.image) {
             // Update the texture data based on view mode
-            let mut new_data = Vec::with_capacity(MAP_WIDTH * MAP_HEIGHT * 4);
-
             match *view_mode {
                 ViewMode::Minerals => {
                     // Render minerals with colors
-                    for cell in &mineral_map.data {
-                        let color = cell.mineral_type.color();
-                        let brightness = 0.5 + cell.density * 0.5;
-                        new_data.push((color.to_srgba().red * brightness * 255.0) as u8);
-                        new_data.push((color.to_srgba().green * brightness * 255.0) as u8);
-                        new_data.push((color.to_srgba().blue * brightness * 255.0) as u8);
-                        new_data.push(255);
+                    if let Some(data) = &mut image.data {
+                        let mut idx = 0;
+                        for cell in &mineral_map.data {
+                            let color = cell.mineral_type.color();
+                            let brightness = 0.5 + cell.density * 0.5;
+                            data[idx] = (color.to_srgba().red * brightness * 255.0) as u8;
+                            data[idx + 1] = (color.to_srgba().green * brightness * 255.0) as u8;
+                            data[idx + 2] = (color.to_srgba().blue * brightness * 255.0) as u8;
+                            data[idx + 3] = 255;
+                            idx += 4;
+                        }
                     }
                 }
                 ViewMode::Heightmap => {
-                    // Render heightmap as grayscale
-                    for (idx, cell) in mineral_map.data.iter().enumerate() {
-                        let height = mineral_map.heightmap[idx];
+                    // Render heightmap as grayscale with enhanced contrast
+                    if let Some(data) = &mut image.data {
+                        for (cell_idx, cell) in mineral_map.data.iter().enumerate() {
+                            let height = mineral_map.heightmap[cell_idx];
 
-                        // Map height to grayscale (0-200 range with dramatic variation)
-                        let normalized = (height / 200.0).clamp(0.0, 1.0);
-                        let gray_value = (normalized * 255.0) as u8;
+                            // Map height to grayscale (0-200 range with dramatic variation)
+                            let normalized = (height / 200.0).clamp(0.0, 1.0);
+                            let gray_value = (normalized * 255.0) as u8;
 
-                        // Color empty cells slightly blue to distinguish them
-                        if cell.mineral_type == MineralType::Empty {
-                            new_data.push(gray_value / 2);
-                            new_data.push(gray_value / 2);
-                            new_data.push(gray_value.saturating_add(30));
-                        } else {
-                            new_data.push(gray_value);
-                            new_data.push(gray_value);
-                            new_data.push(gray_value);
+                            let pixel_idx = cell_idx * 4;
+
+                            // Color empty cells slightly blue to distinguish them
+                            if cell.mineral_type == MineralType::Empty {
+                                data[pixel_idx] = gray_value / 3;
+                                data[pixel_idx + 1] = gray_value / 3;
+                                data[pixel_idx + 2] = gray_value.saturating_add(40);
+                            } else {
+                                data[pixel_idx] = gray_value;
+                                data[pixel_idx + 1] = gray_value;
+                                data[pixel_idx + 2] = gray_value;
+                            }
+                            data[pixel_idx + 3] = 255;
                         }
-                        new_data.push(255);
                     }
                 }
             }
-
-            image.data = Some(new_data);
         }
     }
 }

@@ -116,7 +116,7 @@ impl MineralMap {
         let mut heightmap = Vec::with_capacity(MAP_WIDTH * MAP_HEIGHT);
 
         // Try to load lunar DEM for heightmap
-        let lunar_heights = LunarDEM::load("assets/images/ldem_16.tif").and_then(|dem| {
+        let lunar_heights = LunarDEM::load("data/ldem_16.tif").and_then(|dem| {
             // Pick random point on lunar surface (avoid extreme poles)
             let center_lon = rng.gen_range(-180.0..180.0); // Longitude: -180 to 180
             let center_lat = rng.gen_range(-60.0..60.0); // Latitude: -60 to 60 (avoid poles)
@@ -228,9 +228,9 @@ impl MineralMap {
 pub struct MineralMapRenderer;
 
 /// View mode for the map display
-#[derive(Resource, Default, PartialEq)]
+#[derive(Resource, Default, PartialEq, Debug)]
 pub enum ViewMode {
-    #[default]
     Minerals,
+    #[default]
     Heightmap,
 }

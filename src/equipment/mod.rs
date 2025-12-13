@@ -11,13 +11,13 @@ pub use types::{
 pub use tree::{
     EquipmentTreeNode, EquipmentTreeState, EquipmentTreeActions, SelectedEquipment
 };
-pub use sprites::{EquipmentSprites, EquipmentSprite, SelectionOutline};
+pub use sprites::{EquipmentSprites, EquipmentSprite};
 pub use systems::{
     load_equipment_sprites,
     spawn_equipment_sprites,
     update_equipment_positions,
     click_select_equipment,
     move_selected_equipment,
-    update_selection_outlines,
+    update_selection_sprites,
     equipment_mining_system,
 };
