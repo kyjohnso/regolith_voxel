@@ -564,7 +564,7 @@ pub fn spawn_attachments(
         let offset_from_parent = event.attachment_type.standard_offset();
 
         // Find parent equipment entity and position
-        let (parent_entity, spawn_position, attachment_state) = if let Some(parent_id) = event.parent_equipment_id {
+        let (_parent_entity, spawn_position, attachment_state) = if let Some(parent_id) = event.parent_equipment_id {
             equipment_query
                 .iter()
                 .find_map(|(entity, transform, sprite)| {
@@ -876,6 +876,50 @@ pub fn delete_selected_attachment(
             // Despawn the entity
             commands.entity(entity).despawn();
             break;
+        }
+    }
+}
+
+/// System to detach selected attachment with 'X' key
+pub fn detach_selected_attachment(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    selected: Res<SelectedEquipment>,
+    mut attachment_manager: ResMut<super::AttachmentManager>,
+    mut attachment_query: Query<(&Transform, &mut super::AttachmentState, &super::AttachmentSprite)>,
+) {
+    // Only process on 'X' key press
+    if !keyboard.just_pressed(KeyCode::KeyX) {
+        return;
+    }
+
+    let Some(selected_id) = selected.selected_id else {
+        return;
+    };
+
+    // Find the attachment with this ID
+    for (transform, mut attachment_state, attachment_sprite) in &mut attachment_query {
+        if attachment_sprite.attachment_id == selected_id {
+            // Check if it's currently attached
+            if matches!(*attachment_state, super::AttachmentState::AttachedToEquipment { .. }) {
+                // Get current position
+                let current_pos = transform.translation.truncate();
+
+                // Change state to Detached
+                *attachment_state = super::AttachmentState::Detached {
+                    position: current_pos,
+                };
+
+                // Update attachment manager to remove parent
+                if let Some(attachment_info) = attachment_manager
+                    .attachments
+                    .iter_mut()
+                    .find(|a| a.id == selected_id)
+                {
+                    attachment_info.parent_equipment_id = None;
+                }
+
+                break;
+            }
         }
     }
 }

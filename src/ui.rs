@@ -19,6 +19,7 @@ pub fn ui_system(
     mut view_mode: ResMut<ViewMode>,
     mut spawn_attachment_events: EventWriter<SpawnAttachmentEvent>,
     equipment_query: Query<(&Transform, &crate::equipment::EquipmentSprite)>,
+    attachment_query: Query<(&crate::equipment::AttachmentState, &crate::equipment::AttachmentSprite)>,
 ) {
     let ctx = contexts.ctx_mut();
 
@@ -27,7 +28,7 @@ pub fn ui_system(
         ui.horizontal(|ui| {
             ui.label("Regolith Voxel - Mining Operations");
             ui.separator();
-            ui.label("WASD: Pan | Q/E: Zoom | Click: Select | Arrows: Move | M: Mine");
+            ui.label("WASD: Pan | Q/E: Zoom | Click: Select | Arrows: Move | M: Mine | X: Detach");
 
             if let Some(selected_id) = selected.selected_id {
                 ui.separator();
@@ -145,48 +146,65 @@ pub fn ui_system(
 
             ui.separator();
 
-            // Show attachment options when equipment is selected (BEFORE the tree)
+            // Show attachment options based on what's selected (BEFORE the tree)
             if let Some(selected_id) = selected.selected_id {
-                ui.heading("Attachments");
-                ui.label(format!("Add to Unit #{}:", selected_id));
-                ui.add_space(5.0);
-
-                // Find selected equipment position
-                let selected_pos = equipment_query
+                // Check if selected item is an attachment
+                let is_attached_attachment = attachment_query
                     .iter()
-                    .find_map(|(transform, sprite)| {
-                        if sprite.equipment_id == selected_id {
-                            Some(transform.translation.truncate())
-                        } else {
-                            None
-                        }
+                    .find(|(state, sprite)| {
+                        sprite.attachment_id == selected_id
+                            && matches!(**state, crate::equipment::AttachmentState::AttachedToEquipment { .. })
                     })
-                    .unwrap_or(Vec2::ZERO);
+                    .is_some();
 
-                // Attachment buttons - system will handle standard offsets automatically
-                ui.horizontal(|ui| {
-                    if ui.button("+ Transmitter").clicked() {
-                        spawn_attachment_events.write(SpawnAttachmentEvent {
-                            attachment_type: AttachmentType::Transmitter,
-                            position: selected_pos, // System adds standard offset
-                            parent_equipment_id: Some(selected_id),
-                        });
-                    }
-                    if ui.button("+ Receiver").clicked() {
-                        spawn_attachment_events.write(SpawnAttachmentEvent {
-                            attachment_type: AttachmentType::Receiver,
-                            position: selected_pos, // System adds standard offset
-                            parent_equipment_id: Some(selected_id),
-                        });
-                    }
-                    if ui.button("+ Computer").clicked() {
-                        spawn_attachment_events.write(SpawnAttachmentEvent {
-                            attachment_type: AttachmentType::Computer,
-                            position: selected_pos, // System adds standard offset
-                            parent_equipment_id: Some(selected_id),
-                        });
-                    }
-                });
+                if is_attached_attachment {
+                    // Show detach option for attached attachments
+                    ui.heading("Attachment Options");
+                    ui.label("Press 'X' key to detach from parent");
+                    ui.add_space(5.0);
+                } else {
+                    // Show spawn options for equipment
+                    ui.heading("Attachments");
+                    ui.label(format!("Add to Unit #{}:", selected_id));
+                    ui.add_space(5.0);
+
+                    // Find selected equipment position
+                    let selected_pos = equipment_query
+                        .iter()
+                        .find_map(|(transform, sprite)| {
+                            if sprite.equipment_id == selected_id {
+                                Some(transform.translation.truncate())
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or(Vec2::ZERO);
+
+                    // Attachment buttons - system will handle standard offsets automatically
+                    ui.horizontal(|ui| {
+                        if ui.button("+ Transmitter").clicked() {
+                            spawn_attachment_events.write(SpawnAttachmentEvent {
+                                attachment_type: AttachmentType::Transmitter,
+                                position: selected_pos, // System adds standard offset
+                                parent_equipment_id: Some(selected_id),
+                            });
+                        }
+                        if ui.button("+ Receiver").clicked() {
+                            spawn_attachment_events.write(SpawnAttachmentEvent {
+                                attachment_type: AttachmentType::Receiver,
+                                position: selected_pos, // System adds standard offset
+                                parent_equipment_id: Some(selected_id),
+                            });
+                        }
+                        if ui.button("+ Computer").clicked() {
+                            spawn_attachment_events.write(SpawnAttachmentEvent {
+                                attachment_type: AttachmentType::Computer,
+                                position: selected_pos, // System adds standard offset
+                                parent_equipment_id: Some(selected_id),
+                            });
+                        }
+                    });
+                }
 
                 ui.add_space(10.0);
                 ui.separator();
