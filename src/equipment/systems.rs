@@ -9,8 +9,9 @@ use std::collections::HashSet;
 use crate::scene::{MineralMap, MineralType, MAP_HEIGHT, MAP_WIDTH};
 
 use super::{
-    EquipmentSprite, EquipmentSprites, EquipmentTreeActions, EquipmentTreeNode,
-    EquipmentTreeState, EquipmentType, SelectedEquipment, SelectionOutline,
+    AttachmentState, EquipmentPiece, EquipmentSprite, EquipmentSprites,
+    EquipmentTreeActions, EquipmentTreeNode, EquipmentTreeState, EquipmentType,
+    MinerBody, SamplerBody, SelectedEquipment, SelectionOutline, SmelterBody, TransportBody,
 };
 
 /// Load equipment sprites - generate them programmatically
@@ -113,13 +114,43 @@ pub fn spawn_equipment_sprites(
                         )
                     });
 
-                    commands.spawn((
+                    // Create base EquipmentPiece component
+                    let equipment_piece = EquipmentPiece {
+                        id: node.id,
+                        name: node.name.clone(),
+                        mass: 100.0, // Default mass
+                        energy_consumption: 5.0, // Default energy consumption
+                    };
+
+                    // Create AttachmentState component
+                    let attachment_state = AttachmentState::Detached { position };
+
+                    // Spawn entity with appropriate body component based on type
+                    let mut entity_commands = commands.spawn((
                         Sprite::from_image(sprite_handle.clone()),
                         Transform::from_translation(position.extend(1.0)),
                         EquipmentSprite {
                             equipment_id: node.id,
                         },
+                        equipment_piece,
+                        attachment_state,
                     ));
+
+                    // Add the specific body component based on equipment type
+                    match equipment_type {
+                        EquipmentType::Sampler => {
+                            entity_commands.insert(SamplerBody);
+                        }
+                        EquipmentType::SurfaceMining | EquipmentType::DeepMining => {
+                            entity_commands.insert(MinerBody { equipment_type });
+                        }
+                        EquipmentType::Refining => {
+                            entity_commands.insert(SmelterBody);
+                        }
+                        EquipmentType::Transport => {
+                            entity_commands.insert(TransportBody);
+                        }
+                    }
                 }
             }
         }
@@ -139,12 +170,23 @@ pub fn spawn_equipment_sprites(
 /// System to update equipment positions in the state when sprites move
 pub fn update_equipment_positions(
     mut equipment_state: ResMut<EquipmentTreeState>,
-    sprite_query: Query<(&Transform, &EquipmentSprite), Changed<Transform>>,
+    mut sprite_query: Query<
+        (&Transform, &EquipmentSprite, &mut AttachmentState),
+        Changed<Transform>,
+    >,
 ) {
-    for (transform, equipment_sprite) in &sprite_query {
-        // Find the equipment node and update its position
+    for (transform, equipment_sprite, mut attachment_state) in &mut sprite_query {
+        let position = transform.translation.truncate();
+
+        // Update the tree node position (for backwards compatibility)
         if let Some(node) = equipment_state.find_node_mut(equipment_sprite.equipment_id) {
-            node.position = Some(transform.translation.truncate());
+            node.position = Some(position);
+        }
+
+        // Update the AttachmentState position if detached
+        if let AttachmentState::Detached { position: ref mut state_pos } = attachment_state.as_mut()
+        {
+            *state_pos = position;
         }
     }
 }

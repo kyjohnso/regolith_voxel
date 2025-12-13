@@ -5,7 +5,9 @@ mod tree;
 mod sprites;
 mod systems;
 
-pub use types::EquipmentType;
+pub use types::{
+    EquipmentType, EquipmentPiece, AttachmentState, MinerBody, SamplerBody, SmelterBody, TransportBody
+};
 pub use tree::{
     EquipmentTreeNode, EquipmentTreeState, EquipmentTreeActions, SelectedEquipment
 };
