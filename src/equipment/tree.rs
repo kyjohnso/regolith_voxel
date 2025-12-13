@@ -261,8 +261,17 @@ impl Default for EquipmentTreeState {
                 container
             },
             {
-                let container = EquipmentTreeNode::container(next_id, "Deep Mining");
+                let mut container = EquipmentTreeNode::container(next_id, "Deep Mining");
                 next_id += 1;
+
+                // Add a sample deep miner
+                container.children.push(EquipmentTreeNode::equipment(
+                    next_id,
+                    "Deep Miner 1",
+                    EquipmentType::DeepMining,
+                ));
+                next_id += 1;
+
                 container
             },
             {

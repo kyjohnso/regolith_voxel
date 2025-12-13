@@ -139,16 +139,19 @@ pub fn spawn_equipment_sprites(
                     // Add the specific body component based on equipment type
                     match equipment_type {
                         EquipmentType::Sampler => {
-                            entity_commands.insert(SamplerBody);
+                            entity_commands.insert(SamplerBody::default());
                         }
-                        EquipmentType::SurfaceMining | EquipmentType::DeepMining => {
-                            entity_commands.insert(MinerBody { equipment_type });
+                        EquipmentType::SurfaceMining => {
+                            entity_commands.insert(MinerBody::surface_miner());
+                        }
+                        EquipmentType::DeepMining => {
+                            entity_commands.insert(MinerBody::deep_miner());
                         }
                         EquipmentType::Refining => {
-                            entity_commands.insert(SmelterBody);
+                            entity_commands.insert(SmelterBody::default());
                         }
                         EquipmentType::Transport => {
-                            entity_commands.insert(TransportBody);
+                            entity_commands.insert(TransportBody::default());
                         }
                     }
                 }
@@ -403,8 +406,7 @@ pub fn update_selection_outlines(
 /// System for equipment to mine nearby cells
 pub fn equipment_mining_system(
     keyboard: Res<ButtonInput<KeyCode>>,
-    equipment_state: Res<EquipmentTreeState>,
-    sprite_query: Query<(&Transform, &EquipmentSprite)>,
+    sprite_query: Query<(&Transform, &EquipmentSprite, &MinerBody)>,
     mut mineral_map: ResMut<MineralMap>,
 ) {
     // Press M to mine with active equipment
@@ -414,61 +416,77 @@ pub fn equipment_mining_system(
 
     println!("M key pressed - checking for mining equipment...");
 
-    // Find all active mining equipment
-    for (transform, equipment_sprite) in sprite_query.iter() {
-        if let Some(node) = equipment_state.find_node(equipment_sprite.equipment_id) {
-            // Check if this is mining equipment
-            let can_mine = matches!(
-                node.equipment_type(),
-                Some(EquipmentType::SurfaceMining) | Some(EquipmentType::DeepMining)
-            );
+    // Find all active mining equipment with MinerBody component
+    for (transform, _equipment_sprite, miner_body) in sprite_query.iter() {
+        // Get equipment position in world space
+        let world_pos = transform.translation.truncate();
 
-            if !can_mine {
-                continue;
-            }
+        println!(
+            "Mining with {} (depth: {:.0}-{:.0}, radius: {:.1}) at world pos: {:?}",
+            match miner_body.equipment_type {
+                EquipmentType::SurfaceMining => "Surface Miner",
+                EquipmentType::DeepMining => "Deep Miner",
+                _ => "Unknown Miner",
+            },
+            miner_body.depth_range.0,
+            miner_body.depth_range.1,
+            miner_body.mining_radius,
+            world_pos
+        );
 
-            // Get equipment position in world space
-            let world_pos = transform.translation.truncate();
+        // Convert to map coordinates (accounting for 2x scale of map sprite)
+        // Map is centered at (0, 0) in world space
+        // Flip Y because image coordinates go down but world coordinates go up
+        let map_x = ((world_pos.x / 2.0) + (MAP_WIDTH as f32 / 2.0)) as i32;
+        let map_y = ((MAP_HEIGHT as f32 / 2.0) - (world_pos.y / 2.0)) as i32;
 
-            println!(
-                "Mining with equipment {} at world pos: {:?}",
-                node.name, world_pos
-            );
+        println!("Map coordinates: x={}, y={}", map_x, map_y);
 
-            // Convert to map coordinates (accounting for 2x scale of map sprite)
-            // Map is centered at (0, 0) in world space
-            // Flip Y because image coordinates go down but world coordinates go up
-            let map_x = ((world_pos.x / 2.0) + (MAP_WIDTH as f32 / 2.0)) as i32;
-            let map_y = ((MAP_HEIGHT as f32 / 2.0) - (world_pos.y / 2.0)) as i32;
+        // Use mining radius from the miner body
+        let mining_radius = miner_body.mining_radius as i32;
 
-            println!("Map coordinates: x={}, y={}", map_x, map_y);
+        let mut cells_mined = 0;
+        let mut cells_out_of_range = 0;
 
-            // Mining radius (clear a 5x5 area)
-            let mining_radius = 10;
+        for dy in -mining_radius..=mining_radius {
+            for dx in -mining_radius..=mining_radius {
+                let x = map_x + dx;
+                let y = map_y + dy;
 
-            for dy in -mining_radius..=mining_radius {
-                for dx in -mining_radius..=mining_radius {
-                    let x = map_x + dx;
-                    let y = map_y + dy;
+                if x >= 0 && x < MAP_WIDTH as i32 && y >= 0 && y < MAP_HEIGHT as i32 {
+                    let idx = y as usize * MAP_WIDTH + x as usize;
+                    let current_height = mineral_map.heightmap[idx];
 
-                    if x >= 0 && x < MAP_WIDTH as i32 && y >= 0 && y < MAP_HEIGHT as i32 {
-                        let idx = y as usize * MAP_WIDTH + x as usize;
+                    // Check if this depth is within the miner's working range
+                    if current_height < miner_body.depth_range.0
+                        || current_height > miner_body.depth_range.1
+                    {
+                        cells_out_of_range += 1;
+                        continue; // Skip cells outside depth range
+                    }
 
-                        // Gradually reduce height by mining
-                        mineral_map.heightmap[idx] = (mineral_map.heightmap[idx] - 5.0).max(0.0);
+                    cells_mined += 1;
 
-                        // If height is depleted, remove the material
-                        if mineral_map.heightmap[idx] <= 0.5 {
-                            if let Some(cell) = mineral_map.get_mut(x as usize, y as usize) {
-                                cell.mineral_type = MineralType::Empty;
-                                cell.mined = true;
-                                cell.density = 0.0;
-                                mineral_map.heightmap[idx] = 0.0;
-                            }
+                    // Gradually reduce height by mining using extraction rate
+                    mineral_map.heightmap[idx] =
+                        (mineral_map.heightmap[idx] - miner_body.extraction_rate * 5.0).max(0.0);
+
+                    // If height is depleted, remove the material
+                    if mineral_map.heightmap[idx] <= 0.5 {
+                        if let Some(cell) = mineral_map.get_mut(x as usize, y as usize) {
+                            cell.mineral_type = MineralType::Empty;
+                            cell.mined = true;
+                            cell.density = 0.0;
+                            mineral_map.heightmap[idx] = 0.0;
                         }
                     }
                 }
             }
         }
+
+        println!(
+            "Mined {} units, {} units out of depth range ({:.0}-{:.0})",
+            cells_mined, cells_out_of_range, miner_body.depth_range.0, miner_body.depth_range.1
+        );
     }
 }
