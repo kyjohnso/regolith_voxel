@@ -219,4 +219,27 @@ impl AttachmentType {
             AttachmentType::Computer => "Computer",
         }
     }
+
+    /// Get the standard offset for this attachment type relative to parent
+    pub fn standard_offset(&self) -> bevy::prelude::Vec2 {
+        match self {
+            AttachmentType::Transmitter => bevy::prelude::Vec2::new(20.0, 20.0),  // Top-right
+            AttachmentType::Receiver => bevy::prelude::Vec2::new(-20.0, 20.0),    // Top-left
+            AttachmentType::Computer => bevy::prelude::Vec2::new(0.0, 25.0),      // Center-top
+        }
+    }
 }
+
+// Mount point marker components - indicate what types of attachments can be mounted
+
+/// Marker component for equipment that has a communication mount (transmitter/receiver)
+#[derive(Component, Debug, Clone, Copy)]
+pub struct HasCommunicationMount;
+
+/// Marker component for equipment that has a control mount (computer)
+#[derive(Component, Debug, Clone, Copy)]
+pub struct HasControlMount;
+
+/// Marker component for equipment that has a utility mount (general purpose)
+#[derive(Component, Debug, Clone, Copy)]
+pub struct HasUtilityMount;
