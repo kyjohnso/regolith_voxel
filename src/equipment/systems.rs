@@ -871,6 +871,94 @@ pub fn delete_selected_attachment(
     }
 }
 
+/// System to attach selected attachments to nearby compatible equipment with 'T' key
+pub fn attach_selected_attachment(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    selected: Res<SelectedEquipment>,
+    mut attachment_manager: ResMut<super::AttachmentManager>,
+    mut attachment_query: Query<(&Transform, &mut super::AttachmentState, &super::AttachmentSprite)>,
+    equipment_query: Query<(&Transform, &EquipmentSprite, Option<&super::HasCommunicationMount>, Option<&super::HasControlMount>, Option<&super::HasUtilityMount>)>,
+) {
+    use super::AttachmentType;
+
+    // Only process on 'T' key press
+    if !keyboard.just_pressed(KeyCode::KeyT) {
+        return;
+    }
+
+    if selected.selected_ids.is_empty() {
+        return;
+    }
+
+    const MAX_ATTACH_DISTANCE: f32 = 20.0;
+
+    // Attach all selected detached attachments
+    for (attachment_transform, mut attachment_state, attachment_sprite) in &mut attachment_query {
+        if selected.selected_ids.contains(&attachment_sprite.attachment_id) {
+            // Check if it's currently detached
+            if matches!(*attachment_state, super::AttachmentState::Detached { .. }) {
+                // Get attachment info to find its type
+                if let Some(attachment_info) = attachment_manager
+                    .attachments
+                    .iter()
+                    .find(|a| a.id == attachment_sprite.attachment_id)
+                {
+                    let attachment_pos = attachment_transform.translation.truncate();
+                    let attachment_type = attachment_info.attachment_type;
+
+                    // Find nearest compatible equipment within range
+                    let mut nearest_equipment: Option<(usize, f32, Vec2)> = None;
+
+                    for (equipment_transform, equipment_sprite, has_comm, has_control, _has_utility) in &equipment_query {
+                        let equipment_pos = equipment_transform.translation.truncate();
+                        let distance = attachment_pos.distance(equipment_pos);
+
+                        if distance > MAX_ATTACH_DISTANCE {
+                            continue;
+                        }
+
+                        // Check if equipment has compatible mount point
+                        let is_compatible = match attachment_type {
+                            AttachmentType::Transmitter | AttachmentType::Receiver => has_comm.is_some(),
+                            AttachmentType::Computer => has_control.is_some(),
+                        };
+
+                        if !is_compatible {
+                            continue;
+                        }
+
+                        // Update nearest if this is closer
+                        if nearest_equipment.is_none() || distance < nearest_equipment.as_ref().unwrap().1 {
+                            nearest_equipment = Some((equipment_sprite.equipment_id, distance, equipment_pos));
+                        }
+                    }
+
+                    // If we found compatible equipment, attach to it
+                    if let Some((equipment_id, _distance, equipment_pos)) = nearest_equipment {
+                        // Calculate offset from parent
+                        let offset = attachment_pos - equipment_pos;
+
+                        // Change state to Attached
+                        *attachment_state = super::AttachmentState::AttachedToEquipment {
+                            parent: Entity::PLACEHOLDER, // Will be updated by update_attachment_positions
+                        };
+
+                        // Update attachment manager
+                        if let Some(attachment_info) = attachment_manager
+                            .attachments
+                            .iter_mut()
+                            .find(|a| a.id == attachment_sprite.attachment_id)
+                        {
+                            attachment_info.parent_equipment_id = Some(equipment_id);
+                            attachment_info.offset_from_parent = offset;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// System to detach selected attachments with 'X' key (supports multi-selection)
 pub fn detach_selected_attachment(
     keyboard: Res<ButtonInput<KeyCode>>,

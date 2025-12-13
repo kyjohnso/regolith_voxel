@@ -28,7 +28,7 @@ pub fn ui_system(
         ui.horizontal(|ui| {
             ui.label("Regolith Voxel - Mining Operations");
             ui.separator();
-            ui.label("WASD: Pan | Q/E: Zoom | Click: Select | Arrows: Move | M: Mine | X: Detach");
+            ui.label("WASD: Pan | Q/E: Zoom | Click: Select | Arrows: Move | M: Mine | T: Attach | X: Detach");
 
             if !selected.selected_ids.is_empty() {
                 ui.separator();
@@ -162,6 +162,16 @@ pub fn ui_system(
                         })
                 });
 
+                // Check if any selected items are detached attachments
+                let has_detached_attachments = selected.selected_ids.iter().any(|id| {
+                    attachment_query
+                        .iter()
+                        .any(|(state, sprite)| {
+                            sprite.attachment_id == *id
+                                && matches!(*state, crate::equipment::AttachmentState::Detached { .. })
+                        })
+                });
+
                 if has_attached_attachments {
                     // Show detach option for attached attachments
                     ui.heading("Attachment Options");
@@ -169,6 +179,17 @@ pub fn ui_system(
                         ui.label("Press 'X' key to detach from parent");
                     } else {
                         ui.label(format!("Press 'X' key to detach {} attachments", selected.selected_ids.len()));
+                    }
+                    ui.add_space(5.0);
+                }
+
+                if has_detached_attachments {
+                    // Show attach option for detached attachments
+                    ui.heading("Attachment Options");
+                    if selected.selected_ids.len() == 1 {
+                        ui.label("Move near equipment and press 'T' key to attach (max 20 units)");
+                    } else {
+                        ui.label(format!("Move {} detached attachments near equipment and press 'T' to attach", selected.selected_ids.len()));
                     }
                     ui.add_space(5.0);
                 }

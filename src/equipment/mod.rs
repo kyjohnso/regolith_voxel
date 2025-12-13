@@ -27,6 +27,7 @@ pub use systems::{
     move_selected_equipment,
     update_selection_sprites,
     delete_selected_attachment,
+    attach_selected_attachment,
     detach_selected_attachment,
     equipment_mining_system,
 };

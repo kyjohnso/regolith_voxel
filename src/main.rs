@@ -17,7 +17,7 @@ use equipment::{
     click_select_equipment, equipment_mining_system, load_equipment_sprites, load_attachment_sprites,
     move_selected_equipment, spawn_equipment_sprites, spawn_attachments, update_equipment_positions,
     update_attachment_positions, sync_outliner_selection, update_selection_sprites, delete_selected_attachment,
-    detach_selected_attachment, EquipmentTreeActions, EquipmentTreeState, SelectedEquipment,
+    attach_selected_attachment, detach_selected_attachment, EquipmentTreeActions, EquipmentTreeState, SelectedEquipment,
     AttachmentManager, SpawnAttachmentEvent,
 };
 use scene::{
@@ -69,6 +69,7 @@ fn main() {
                 update_attachment_positions,
                 update_selection_sprites,
                 delete_selected_attachment,
+                attach_selected_attachment,
                 detach_selected_attachment,
                 equipment_mining_system,
                 // Scene physics
