@@ -151,3 +151,72 @@ impl Default for TransportBody {
         }
     }
 }
+
+// ============================================================================
+// Attachment Components - Transmitters, Receivers, Computers
+// ============================================================================
+
+/// Component for transmitter attachments - broadcasts messages
+#[derive(Component, Debug, Clone)]
+pub struct Transmitter {
+    pub range: f32,           // Broadcast range in world units
+    pub power: f32,           // Transmission power (affects range)
+}
+
+impl Default for Transmitter {
+    fn default() -> Self {
+        Self {
+            range: 100.0,
+            power: 1.0,
+        }
+    }
+}
+
+/// Component for receiver attachments - listens for messages
+#[derive(Component, Debug, Clone)]
+pub struct Receiver {
+    pub sensitivity: f32,     // Reception sensitivity (affects range)
+}
+
+impl Default for Receiver {
+    fn default() -> Self {
+        Self {
+            sensitivity: 1.0,
+        }
+    }
+}
+
+/// Component for computer attachments - runs programs
+#[derive(Component, Debug, Clone)]
+pub struct Computer {
+    pub memory_size: usize,   // Available memory for programs
+    pub clock_speed: f32,     // Instructions per second
+}
+
+impl Default for Computer {
+    fn default() -> Self {
+        Self {
+            memory_size: 256,
+            clock_speed: 10.0,
+        }
+    }
+}
+
+/// Enum to identify attachment types
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AttachmentType {
+    Transmitter,
+    Receiver,
+    Computer,
+}
+
+impl AttachmentType {
+    /// Get display name
+    pub fn name(&self) -> &str {
+        match self {
+            AttachmentType::Transmitter => "Transmitter",
+            AttachmentType::Receiver => "Receiver",
+            AttachmentType::Computer => "Computer",
+        }
+    }
+}

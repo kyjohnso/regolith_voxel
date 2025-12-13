@@ -282,6 +282,172 @@ pub fn load_equipment_sprites(mut commands: Commands, mut images: ResMut<Assets<
     });
 }
 
+/// Load attachment sprites - small colored squares for transmitters/receivers/computers
+pub fn load_attachment_sprites(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
+    use super::{AttachmentSprites, AttachmentType};
+
+    let mut normal_sprites = std::collections::HashMap::new();
+    let mut selected_sprites = std::collections::HashMap::new();
+    let size = 20; // Small sprites for attachments
+
+    // Helper to create sprite with custom drawing function
+    fn create_sprite<F>(images: &mut ResMut<Assets<Image>>, size: u32, draw_fn: F) -> Handle<Image>
+    where
+        F: Fn(u32, u32) -> [u8; 4],
+    {
+        let mut pixel_data = Vec::new();
+        for y in 0..size {
+            for x in 0..size {
+                pixel_data.extend_from_slice(&draw_fn(x, y));
+            }
+        }
+
+        let image = Image::new(
+            Extent3d {
+                width: size,
+                height: size,
+                depth_or_array_layers: 1,
+            },
+            TextureDimension::D2,
+            pixel_data,
+            TextureFormat::Rgba8UnormSrgb,
+            Default::default(),
+        );
+
+        images.add(image)
+    }
+
+    // Helper to create a selected version with green halo
+    fn create_selected_sprite<F>(images: &mut ResMut<Assets<Image>>, size: u32, draw_fn: F) -> Handle<Image>
+    where
+        F: Fn(u32, u32) -> [u8; 4],
+    {
+        let halo_size = 28; // Larger to accommodate halo
+        let offset = (halo_size - size) / 2;
+        let center = halo_size as f32 / 2.0;
+        let equipment_radius = size as f32 / 2.0;
+        let halo_radius = halo_size as f32 / 2.0;
+
+        let mut pixel_data = Vec::new();
+        for y in 0..halo_size {
+            for x in 0..halo_size {
+                let dx = x as f32 - center;
+                let dy = y as f32 - center;
+                let distance = (dx * dx + dy * dy).sqrt();
+
+                if x >= offset && x < offset + size && y >= offset && y < offset + size {
+                    let sprite_color = draw_fn(x - offset, y - offset);
+                    pixel_data.extend_from_slice(&sprite_color);
+                } else if distance > equipment_radius && distance <= halo_radius {
+                    let halo_thickness = halo_radius - equipment_radius;
+                    let dist_from_edge = distance - equipment_radius;
+                    let normalized = 1.0 - (dist_from_edge / halo_thickness);
+                    let alpha = (normalized * normalized * 200.0) as u8;
+                    pixel_data.extend_from_slice(&[0, 255, 0, alpha]);
+                } else {
+                    pixel_data.extend_from_slice(&[0, 0, 0, 0]);
+                }
+            }
+        }
+
+        let image = Image::new(
+            Extent3d {
+                width: halo_size,
+                height: halo_size,
+                depth_or_array_layers: 1,
+            },
+            TextureDimension::D2,
+            pixel_data,
+            TextureFormat::Rgba8UnormSrgb,
+            Default::default(),
+        );
+
+        images.add(image)
+    }
+
+    // Transmitter - Cyan/blue with antenna pattern
+    let transmitter_draw = |x: u32, y: u32| -> [u8; 4] {
+        let cx = size / 2;
+        let cy = size / 2;
+        let dx = x as i32 - cx as i32;
+        let dy = y as i32 - cy as i32;
+        let dist = ((dx * dx + dy * dy) as f32).sqrt();
+
+        // Antenna in center
+        if x >= cx - 1 && x <= cx + 1 && y < cy {
+            [100, 200, 255, 255]
+        }
+        // Circular body
+        else if dist < 7.0 {
+            [50, 150, 255, 255]
+        }
+        // Signal waves (concentric rings)
+        else if dist > 7.0 && dist < 8.0 {
+            [80, 180, 255, 200]
+        } else if dist > 9.0 && dist < 9.5 {
+            [80, 180, 255, 150]
+        } else {
+            [0, 0, 0, 0]
+        }
+    };
+    normal_sprites.insert(AttachmentType::Transmitter, create_sprite(&mut images, size, transmitter_draw));
+    selected_sprites.insert(AttachmentType::Transmitter, create_selected_sprite(&mut images, size, transmitter_draw));
+
+    // Receiver - Orange/red with dish pattern
+    let receiver_draw = |x: u32, y: u32| -> [u8; 4] {
+        let cx = size / 2;
+        let cy = size / 2;
+        let dx = x as i32 - cx as i32;
+        let dy = y as i32 - cy as i32;
+        let dist = ((dx * dx + dy * dy) as f32).sqrt();
+
+        // Dish (semi-circle)
+        if dist < 7.0 && y >= cy {
+            [255, 150, 50, 255]
+        }
+        // Center point
+        else if dist < 3.0 {
+            [255, 100, 0, 255]
+        }
+        // Support
+        else if x >= cx - 1 && x <= cx + 1 && y > cy - 3 && y < cy {
+            [200, 120, 40, 255]
+        } else {
+            [0, 0, 0, 0]
+        }
+    };
+    normal_sprites.insert(AttachmentType::Receiver, create_sprite(&mut images, size, receiver_draw));
+    selected_sprites.insert(AttachmentType::Receiver, create_selected_sprite(&mut images, size, receiver_draw));
+
+    // Computer - Purple with circuit board pattern
+    let computer_draw = |x: u32, y: u32| -> [u8; 4] {
+        // Chip body (square)
+        if x > 3 && x < 17 && y > 3 && y < 17 {
+            // Circuit traces
+            if (x == 6 || x == 10 || x == 14) && y > 5 && y < 15 {
+                [200, 150, 255, 255]
+            } else if (y == 6 || y == 10 || y == 14) && x > 5 && x < 15 {
+                [200, 150, 255, 255]
+            } else {
+                [150, 80, 200, 255]
+            }
+        }
+        // Connection pins
+        else if (x < 3 || x > 17) && (y == 6 || y == 10 || y == 14) {
+            [180, 100, 220, 255]
+        } else {
+            [0, 0, 0, 0]
+        }
+    };
+    normal_sprites.insert(AttachmentType::Computer, create_sprite(&mut images, size, computer_draw));
+    selected_sprites.insert(AttachmentType::Computer, create_selected_sprite(&mut images, size, computer_draw));
+
+    commands.insert_resource(AttachmentSprites {
+        normal: normal_sprites,
+        selected: selected_sprites,
+    });
+}
+
 /// System to spawn sprite entities for equipment that doesn't have one yet
 pub fn spawn_equipment_sprites(
     mut commands: Commands,
@@ -373,6 +539,89 @@ pub fn spawn_equipment_sprites(
     }
 }
 
+/// System to spawn attachment entities (transmitters, receivers, computers)
+pub fn spawn_attachments(
+    mut commands: Commands,
+    mut attachment_manager: ResMut<super::AttachmentManager>,
+    attachment_sprites: Res<super::AttachmentSprites>,
+    mut spawn_events: EventReader<super::SpawnAttachmentEvent>,
+    equipment_query: Query<(&Transform, &EquipmentSprite)>,
+) {
+    use super::{AttachmentInfo, AttachmentSprite, AttachmentType, Computer, Receiver, Transmitter};
+
+    for event in spawn_events.read() {
+        let attachment_id = attachment_manager.next_id;
+        attachment_manager.next_id += 1;
+
+        // Calculate offset from parent equipment
+        let offset_from_parent = if let Some(parent_id) = event.parent_equipment_id {
+            // Find parent equipment position
+            let parent_pos = equipment_query
+                .iter()
+                .find_map(|(transform, sprite)| {
+                    if sprite.equipment_id == parent_id {
+                        Some(transform.translation.truncate())
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(Vec2::ZERO);
+
+            // Calculate offset: attachment position - parent position
+            event.position - parent_pos
+        } else {
+            Vec2::ZERO
+        };
+
+        // Get the appropriate sprite
+        if let Some(sprite_handle) = attachment_sprites.normal.get(&event.attachment_type) {
+            // Create the attachment entity
+            let mut entity_commands = commands.spawn((
+                Sprite::from_image(sprite_handle.clone()),
+                Transform::from_translation(event.position.extend(2.0)), // Higher z to appear above equipment
+                AttachmentSprite {
+                    attachment_id,
+                    attachment_type: event.attachment_type,
+                },
+                // Start detached
+                super::AttachmentState::Detached {
+                    position: event.position,
+                },
+            ));
+
+            // Add the specific attachment component
+            match event.attachment_type {
+                AttachmentType::Transmitter => {
+                    entity_commands.insert(Transmitter::default());
+                }
+                AttachmentType::Receiver => {
+                    entity_commands.insert(Receiver::default());
+                }
+                AttachmentType::Computer => {
+                    entity_commands.insert(Computer::default());
+                }
+            }
+
+            // Track the attachment
+            attachment_manager.attachments.push(AttachmentInfo {
+                id: attachment_id,
+                attachment_type: event.attachment_type,
+                parent_equipment_id: event.parent_equipment_id,
+                offset_from_parent,
+            });
+
+            println!(
+                "Spawned {} at position ({}, {}) with offset ({}, {})",
+                event.attachment_type.name(),
+                event.position.x,
+                event.position.y,
+                offset_from_parent.x,
+                offset_from_parent.y
+            );
+        }
+    }
+}
+
 /// System to update equipment positions in the state when sprites move
 pub fn update_equipment_positions(
     mut equipment_state: ResMut<EquipmentTreeState>,
@@ -397,22 +646,29 @@ pub fn update_equipment_positions(
     }
 }
 
-/// System to select equipment by clicking on them
+/// System to select equipment or attachments by clicking on them
 pub fn click_select_equipment(
     mouse_button: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
     equipment_query: Query<(&Transform, &EquipmentSprite)>,
+    attachment_query: Query<(&Transform, &super::AttachmentSprite)>,
     mut selected: ResMut<SelectedEquipment>,
     mut equipment_state: ResMut<EquipmentTreeState>,
     mut equipment_actions: ResMut<EquipmentTreeActions>,
     mut contexts: bevy_egui::EguiContexts,
 ) {
     if mouse_button.just_pressed(MouseButton::Left) {
-        // Don't process clicks if hovering over UI
-        if contexts.ctx_mut().is_pointer_over_area() {
+        // Don't process clicks if egui wants the pointer input
+        let ctx = contexts.ctx_mut();
+        let wants_pointer = ctx.wants_pointer_input();
+        let is_over_area = ctx.is_pointer_over_area();
+
+        if wants_pointer || is_over_area {
+            println!("Click ignored - egui wants pointer: {}, is over area: {}", wants_pointer, is_over_area);
             return;
         }
+        println!("Processing click - egui doesn't want pointer");
 
         let Ok(window) = windows.single() else {
             return;
@@ -432,22 +688,44 @@ pub fn click_select_equipment(
             return;
         };
 
-        // Check if we clicked on any equipment
+        // Check if we clicked on any attachment or equipment
+        // Check attachments first (they're smaller and should have priority)
         let mut clicked_id: Option<usize> = None;
-        let sprite_size = 64.0; // Equipment sprite click radius (increased for easier clicking)
+        let attachment_size = 24.0; // Attachment sprite click radius
 
-        for (transform, equipment_sprite) in &equipment_query {
+        for (transform, attachment_sprite) in &attachment_query {
             let sprite_pos = transform.translation.truncate();
             let distance = world_position.distance(sprite_pos);
 
-            if distance < sprite_size {
-                clicked_id = Some(equipment_sprite.equipment_id);
+            if distance < attachment_size {
+                clicked_id = Some(attachment_sprite.attachment_id);
                 break;
+            }
+        }
+
+        // If no attachment clicked, check equipment
+        if clicked_id.is_none() {
+            let sprite_size = 64.0; // Equipment sprite click radius (increased for easier clicking)
+
+            for (transform, equipment_sprite) in &equipment_query {
+                let sprite_pos = transform.translation.truncate();
+                let distance = world_position.distance(sprite_pos);
+
+                if distance < sprite_size {
+                    clicked_id = Some(equipment_sprite.equipment_id);
+                    break;
+                }
             }
         }
 
         // Update selection in both resources
         selected.selected_id = clicked_id;
+
+        if let Some(id) = clicked_id {
+            println!("Selected equipment/attachment with ID: {}", id);
+        } else {
+            println!("Deselected (clicked empty space)");
+        }
 
         // Clear previous selection and set new one in equipment_actions
         equipment_actions.selected.clear();
@@ -471,12 +749,13 @@ pub fn click_select_equipment(
     }
 }
 
-/// System to move selected equipment with arrow keys
+/// System to move selected equipment or attachment with arrow keys
 pub fn move_selected_equipment(
     keyboard: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     selected: Res<SelectedEquipment>,
-    mut sprite_query: Query<(&mut Transform, &EquipmentSprite)>,
+    mut equipment_sprite_query: Query<(&mut Transform, &EquipmentSprite), Without<super::AttachmentSprite>>,
+    mut attachment_sprite_query: Query<(&mut Transform, &super::AttachmentSprite), Without<EquipmentSprite>>,
 ) {
     let Some(selected_id) = selected.selected_id else {
         return;
@@ -484,7 +763,9 @@ pub fn move_selected_equipment(
 
     let move_speed = 200.0 * time.delta_secs();
 
-    for (mut transform, equipment_sprite) in &mut sprite_query {
+    // Try to move equipment first
+    let mut found = false;
+    for (mut transform, equipment_sprite) in &mut equipment_sprite_query {
         if equipment_sprite.equipment_id == selected_id {
             // Move with arrow keys
             if keyboard.pressed(KeyCode::ArrowUp) {
@@ -499,7 +780,30 @@ pub fn move_selected_equipment(
             if keyboard.pressed(KeyCode::ArrowRight) {
                 transform.translation.x += move_speed;
             }
+            found = true;
             break;
+        }
+    }
+
+    // If not equipment, try attachments
+    if !found {
+        for (mut transform, attachment_sprite) in &mut attachment_sprite_query {
+            if attachment_sprite.attachment_id == selected_id {
+                // Move with arrow keys
+                if keyboard.pressed(KeyCode::ArrowUp) {
+                    transform.translation.y += move_speed;
+                }
+                if keyboard.pressed(KeyCode::ArrowDown) {
+                    transform.translation.y -= move_speed;
+                }
+                if keyboard.pressed(KeyCode::ArrowLeft) {
+                    transform.translation.x -= move_speed;
+                }
+                if keyboard.pressed(KeyCode::ArrowRight) {
+                    transform.translation.x += move_speed;
+                }
+                break;
+            }
         }
     }
 }
@@ -508,7 +812,9 @@ pub fn move_selected_equipment(
 pub fn update_selection_sprites(
     selected: Res<SelectedEquipment>,
     equipment_sprites: Res<EquipmentSprites>,
-    mut sprite_query: Query<(&mut Sprite, &EquipmentSprite)>,
+    attachment_sprites: Res<super::AttachmentSprites>,
+    mut equipment_sprite_query: Query<(&mut Sprite, &EquipmentSprite), Without<super::AttachmentSprite>>,
+    mut attachment_sprite_query: Query<(&mut Sprite, &super::AttachmentSprite), Without<EquipmentSprite>>,
 ) {
     // Only update when selection changes
     if !selected.is_changed() {
@@ -518,7 +824,7 @@ pub fn update_selection_sprites(
     let selected_id = selected.selected_id;
 
     // Update all equipment sprites
-    for (mut sprite, equipment_sprite) in sprite_query.iter_mut() {
+    for (mut sprite, equipment_sprite) in equipment_sprite_query.iter_mut() {
         let is_selected = Some(equipment_sprite.equipment_id) == selected_id;
 
         // Choose the appropriate sprite (normal or selected)
@@ -531,6 +837,85 @@ pub fn update_selection_sprites(
         // Swap the sprite image
         if let Some(handle) = sprite_handle {
             sprite.image = handle.clone();
+        }
+    }
+
+    // Update all attachment sprites
+    for (mut sprite, attachment_sprite) in attachment_sprite_query.iter_mut() {
+        let is_selected = Some(attachment_sprite.attachment_id) == selected_id;
+
+        // Choose the appropriate sprite (normal or selected)
+        let sprite_handle = if is_selected {
+            attachment_sprites.selected.get(&attachment_sprite.attachment_type)
+        } else {
+            attachment_sprites.normal.get(&attachment_sprite.attachment_type)
+        };
+
+        // Swap the sprite image
+        if let Some(handle) = sprite_handle {
+            sprite.image = handle.clone();
+        }
+    }
+}
+
+/// System to delete selected attachment with Delete/Backspace key
+pub fn delete_selected_attachment(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    selected: Res<SelectedEquipment>,
+    mut attachment_manager: ResMut<super::AttachmentManager>,
+    attachment_query: Query<(Entity, &super::AttachmentSprite)>,
+    mut commands: Commands,
+) {
+    // Only process on Delete or Backspace press
+    if !keyboard.just_pressed(KeyCode::Delete) && !keyboard.just_pressed(KeyCode::Backspace) {
+        return;
+    }
+
+    let Some(selected_id) = selected.selected_id else {
+        return;
+    };
+
+    // Find the attachment entity with this ID
+    for (entity, attachment_sprite) in &attachment_query {
+        if attachment_sprite.attachment_id == selected_id {
+            // Remove from attachment manager
+            attachment_manager.attachments.retain(|a| a.id != selected_id);
+
+            // Despawn the entity
+            commands.entity(entity).despawn();
+
+            println!("Deleted attachment #{}", selected_id);
+            break;
+        }
+    }
+}
+
+/// System to update attachment positions to follow their parent equipment
+pub fn update_attachment_positions(
+    attachment_manager: Res<super::AttachmentManager>,
+    equipment_query: Query<(&Transform, &EquipmentSprite)>,
+    mut attachment_query: Query<(&mut Transform, &super::AttachmentSprite), Without<EquipmentSprite>>,
+) {
+    // For each attachment
+    for (mut attachment_transform, attachment_sprite) in &mut attachment_query {
+        // Find the attachment info to get the parent equipment ID and offset
+        if let Some(attachment_info) = attachment_manager
+            .attachments
+            .iter()
+            .find(|a| a.id == attachment_sprite.attachment_id)
+        {
+            // If this attachment has a parent
+            if let Some(parent_id) = attachment_info.parent_equipment_id {
+                // Find the parent equipment entity
+                for (equipment_transform, equipment_sprite) in &equipment_query {
+                    if equipment_sprite.equipment_id == parent_id {
+                        // Update attachment position: parent position + stored offset
+                        let new_position = equipment_transform.translation.truncate() + attachment_info.offset_from_parent;
+                        attachment_transform.translation = new_position.extend(2.0);
+                        break;
+                    }
+                }
+            }
         }
     }
 }

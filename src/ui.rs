@@ -6,6 +6,7 @@ use egui_arbor::Outliner;
 
 use crate::equipment::{
     EquipmentTreeActions, EquipmentTreeNode, EquipmentTreeState, EquipmentType, SelectedEquipment,
+    AttachmentType, SpawnAttachmentEvent,
 };
 use crate::scene::ViewMode;
 
@@ -16,6 +17,8 @@ pub fn ui_system(
     mut equipment_actions: ResMut<EquipmentTreeActions>,
     selected: Res<SelectedEquipment>,
     mut view_mode: ResMut<ViewMode>,
+    mut spawn_attachment_events: EventWriter<SpawnAttachmentEvent>,
+    equipment_query: Query<(&Transform, &crate::equipment::EquipmentSprite)>,
 ) {
     let ctx = contexts.ctx_mut();
 
@@ -141,6 +144,63 @@ pub fn ui_system(
             });
 
             ui.separator();
+
+            // Show attachment options when equipment is selected (BEFORE the tree)
+            if let Some(selected_id) = selected.selected_id {
+                ui.heading("Attachments");
+                ui.label(format!("Add to Unit #{}:", selected_id));
+                ui.add_space(5.0);
+
+                // Find selected equipment position
+                let selected_pos = equipment_query
+                    .iter()
+                    .find_map(|(transform, sprite)| {
+                        if sprite.equipment_id == selected_id {
+                            Some(transform.translation.truncate())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(Vec2::ZERO);
+
+                println!("Selected equipment {} at position: {:?}", selected_id, selected_pos);
+
+                ui.horizontal(|ui| {
+                    if ui.button("+ Transmitter").clicked() {
+                        println!("UI: Transmitter button clicked, sending spawn event at {:?}", selected_pos);
+                        spawn_attachment_events.write(SpawnAttachmentEvent {
+                            attachment_type: AttachmentType::Transmitter,
+                            position: selected_pos,
+                            parent_equipment_id: Some(selected_id),
+                        });
+                    }
+                });
+
+                ui.horizontal(|ui| {
+                    if ui.button("+ Receiver").clicked() {
+                        println!("UI: Receiver button clicked, sending spawn event at {:?}", selected_pos + Vec2::new(40.0, 0.0));
+                        spawn_attachment_events.write(SpawnAttachmentEvent {
+                            attachment_type: AttachmentType::Receiver,
+                            position: selected_pos + Vec2::new(40.0, 0.0),
+                            parent_equipment_id: Some(selected_id),
+                        });
+                    }
+                });
+
+                ui.horizontal(|ui| {
+                    if ui.button("+ Computer").clicked() {
+                        println!("UI: Computer button clicked, sending spawn event at {:?}", selected_pos + Vec2::new(0.0, 40.0));
+                        spawn_attachment_events.write(SpawnAttachmentEvent {
+                            attachment_type: AttachmentType::Computer,
+                            position: selected_pos + Vec2::new(0.0, 40.0),
+                            parent_equipment_id: Some(selected_id),
+                        });
+                    }
+                });
+
+                ui.add_space(10.0);
+                ui.separator();
+            }
 
             // Show the outliner with the tree
             egui::ScrollArea::vertical().show(ui, |ui| {
