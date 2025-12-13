@@ -520,7 +520,7 @@ pub fn spawn_equipment_sprites(
                             entity_commands.insert(SmelterBody::default());
                         }
                         EquipmentType::Transport => {
-                            entity_commands.insert(TransportBody::default());
+                            entity_commands.insert(TransportBody::truck());
                         }
                     }
 
@@ -791,41 +791,56 @@ pub fn move_selected_equipment(
     selected: Res<SelectedEquipment>,
     mut equipment_sprite_query: Query<(&mut Transform, &EquipmentSprite), Without<super::AttachmentSprite>>,
     mut attachment_sprite_query: Query<(&mut Transform, &super::AttachmentSprite), Without<EquipmentSprite>>,
+    transport_query: Query<(&EquipmentSprite, &TransportBody)>,
 ) {
     if selected.selected_ids.is_empty() {
         return;
     }
 
-    let move_speed = 200.0 * time.delta_secs();
+    let base_move_speed = 200.0;
 
-    // Calculate movement delta
-    let mut delta = Vec2::ZERO;
+    // Calculate movement direction
+    let mut direction = Vec2::ZERO;
     if keyboard.pressed(KeyCode::ArrowUp) {
-        delta.y += move_speed;
+        direction.y += 1.0;
     }
     if keyboard.pressed(KeyCode::ArrowDown) {
-        delta.y -= move_speed;
+        direction.y -= 1.0;
     }
     if keyboard.pressed(KeyCode::ArrowLeft) {
-        delta.x -= move_speed;
+        direction.x -= 1.0;
     }
     if keyboard.pressed(KeyCode::ArrowRight) {
-        delta.x += move_speed;
+        direction.x += 1.0;
     }
 
-    if delta == Vec2::ZERO {
+    if direction == Vec2::ZERO {
         return;
     }
 
     // Move all selected equipment
     for (mut transform, equipment_sprite) in &mut equipment_sprite_query {
         if selected.selected_ids.contains(&equipment_sprite.equipment_id) {
+            // Check if this equipment has a TransportBody with speed multiplier
+            let speed_multiplier = transport_query
+                .iter()
+                .find_map(|(sprite, transport)| {
+                    if sprite.equipment_id == equipment_sprite.equipment_id {
+                        Some(transport.speed)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(1.0);
+
+            let delta = direction * base_move_speed * speed_multiplier * time.delta_secs();
             transform.translation.x += delta.x;
             transform.translation.y += delta.y;
         }
     }
 
-    // Move all selected attachments
+    // Move all selected attachments (use base speed without multiplier)
+    let delta = direction * base_move_speed * time.delta_secs();
     for (mut transform, attachment_sprite) in &mut attachment_sprite_query {
         if selected.selected_ids.contains(&attachment_sprite.attachment_id) {
             transform.translation.x += delta.x;
