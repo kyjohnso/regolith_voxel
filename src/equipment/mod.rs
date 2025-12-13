@@ -22,6 +22,7 @@ pub use systems::{
     spawn_attachments,
     update_equipment_positions,
     update_attachment_positions,
+    sync_outliner_selection,
     click_select_equipment,
     move_selected_equipment,
     update_selection_sprites,

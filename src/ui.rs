@@ -30,9 +30,13 @@ pub fn ui_system(
             ui.separator();
             ui.label("WASD: Pan | Q/E: Zoom | Click: Select | Arrows: Move | M: Mine | X: Detach");
 
-            if let Some(selected_id) = selected.selected_id {
+            if !selected.selected_ids.is_empty() {
                 ui.separator();
-                ui.label(format!("Selected: Unit #{}", selected_id));
+                if selected.selected_ids.len() == 1 {
+                    ui.label(format!("Selected: Unit #{}", selected.selected_ids.iter().next().unwrap()));
+                } else {
+                    ui.label(format!("Selected: {} units", selected.selected_ids.len()));
+                }
             }
         });
     });
@@ -147,61 +151,109 @@ pub fn ui_system(
             ui.separator();
 
             // Show attachment options based on what's selected (BEFORE the tree)
-            if let Some(selected_id) = selected.selected_id {
-                // Check if selected item is an attachment
-                let is_attached_attachment = attachment_query
-                    .iter()
-                    .find(|(state, sprite)| {
-                        sprite.attachment_id == selected_id
-                            && matches!(**state, crate::equipment::AttachmentState::AttachedToEquipment { .. })
-                    })
-                    .is_some();
+            if !selected.selected_ids.is_empty() {
+                // Check if any selected items are attached attachments
+                let has_attached_attachments = selected.selected_ids.iter().any(|id| {
+                    attachment_query
+                        .iter()
+                        .any(|(state, sprite)| {
+                            sprite.attachment_id == *id
+                                && matches!(*state, crate::equipment::AttachmentState::AttachedToEquipment { .. })
+                        })
+                });
 
-                if is_attached_attachment {
+                if has_attached_attachments {
                     // Show detach option for attached attachments
                     ui.heading("Attachment Options");
-                    ui.label("Press 'X' key to detach from parent");
+                    if selected.selected_ids.len() == 1 {
+                        ui.label("Press 'X' key to detach from parent");
+                    } else {
+                        ui.label(format!("Press 'X' key to detach {} attachments", selected.selected_ids.len()));
+                    }
                     ui.add_space(5.0);
-                } else {
+                }
+
+                // Check if any selected items are equipment (not attachments)
+                let selected_equipment: Vec<_> = selected.selected_ids
+                    .iter()
+                    .filter(|id| {
+                        equipment_query.iter().any(|(_, sprite)| sprite.equipment_id == **id)
+                    })
+                    .copied()
+                    .collect();
+
+                if !selected_equipment.is_empty() {
                     // Show spawn options for equipment
                     ui.heading("Attachments");
-                    ui.label(format!("Add to Unit #{}:", selected_id));
+                    if selected_equipment.len() == 1 {
+                        ui.label(format!("Add to Unit #{}:", selected_equipment[0]));
+                    } else {
+                        ui.label(format!("Add to {} selected units:", selected_equipment.len()));
+                    }
                     ui.add_space(5.0);
 
-                    // Find selected equipment position
-                    let selected_pos = equipment_query
-                        .iter()
-                        .find_map(|(transform, sprite)| {
-                            if sprite.equipment_id == selected_id {
-                                Some(transform.translation.truncate())
-                            } else {
-                                None
-                            }
-                        })
-                        .unwrap_or(Vec2::ZERO);
-
-                    // Attachment buttons - system will handle standard offsets automatically
+                    // Attachment buttons - will spawn on all selected equipment
                     ui.horizontal(|ui| {
                         if ui.button("+ Transmitter").clicked() {
-                            spawn_attachment_events.write(SpawnAttachmentEvent {
-                                attachment_type: AttachmentType::Transmitter,
-                                position: selected_pos, // System adds standard offset
-                                parent_equipment_id: Some(selected_id),
-                            });
+                            // Spawn attachment on each selected equipment
+                            for equipment_id in &selected_equipment {
+                                let selected_pos = equipment_query
+                                    .iter()
+                                    .find_map(|(transform, sprite)| {
+                                        if sprite.equipment_id == *equipment_id {
+                                            Some(transform.translation.truncate())
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .unwrap_or(Vec2::ZERO);
+
+                                spawn_attachment_events.write(SpawnAttachmentEvent {
+                                    attachment_type: AttachmentType::Transmitter,
+                                    position: selected_pos,
+                                    parent_equipment_id: Some(*equipment_id),
+                                });
+                            }
                         }
                         if ui.button("+ Receiver").clicked() {
-                            spawn_attachment_events.write(SpawnAttachmentEvent {
-                                attachment_type: AttachmentType::Receiver,
-                                position: selected_pos, // System adds standard offset
-                                parent_equipment_id: Some(selected_id),
-                            });
+                            for equipment_id in &selected_equipment {
+                                let selected_pos = equipment_query
+                                    .iter()
+                                    .find_map(|(transform, sprite)| {
+                                        if sprite.equipment_id == *equipment_id {
+                                            Some(transform.translation.truncate())
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .unwrap_or(Vec2::ZERO);
+
+                                spawn_attachment_events.write(SpawnAttachmentEvent {
+                                    attachment_type: AttachmentType::Receiver,
+                                    position: selected_pos,
+                                    parent_equipment_id: Some(*equipment_id),
+                                });
+                            }
                         }
                         if ui.button("+ Computer").clicked() {
-                            spawn_attachment_events.write(SpawnAttachmentEvent {
-                                attachment_type: AttachmentType::Computer,
-                                position: selected_pos, // System adds standard offset
-                                parent_equipment_id: Some(selected_id),
-                            });
+                            for equipment_id in &selected_equipment {
+                                let selected_pos = equipment_query
+                                    .iter()
+                                    .find_map(|(transform, sprite)| {
+                                        if sprite.equipment_id == *equipment_id {
+                                            Some(transform.translation.truncate())
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .unwrap_or(Vec2::ZERO);
+
+                                spawn_attachment_events.write(SpawnAttachmentEvent {
+                                    attachment_type: AttachmentType::Computer,
+                                    position: selected_pos,
+                                    parent_equipment_id: Some(*equipment_id),
+                                });
+                            }
                         }
                     });
                 }

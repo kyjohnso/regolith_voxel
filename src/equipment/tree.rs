@@ -393,10 +393,10 @@ impl OutlinerActions<EquipmentTreeNode> for EquipmentTreeActions {
     fn on_custom_action(&mut self, _id: &usize, _icon: &str) {}
 }
 
-/// Resource to track selected equipment
+/// Resource to track selected equipment (supports multi-selection)
 #[derive(Resource, Default)]
 pub struct SelectedEquipment {
-    pub selected_id: Option<usize>,
+    pub selected_ids: HashSet<usize>,
 }
 
 /// Resource to manage attachment entities

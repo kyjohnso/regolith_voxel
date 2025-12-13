@@ -717,7 +717,10 @@ pub fn click_select_equipment(
         }
 
         // Update selection in both resources
-        selected.selected_id = clicked_id;
+        selected.selected_ids.clear();
+        if let Some(id) = clicked_id {
+            selected.selected_ids.insert(id);
+        }
 
         // Clear previous selection and set new one in equipment_actions
         equipment_actions.selected.clear();
@@ -741,7 +744,7 @@ pub fn click_select_equipment(
     }
 }
 
-/// System to move selected equipment or attachment with arrow keys
+/// System to move selected equipment or attachment with arrow keys (supports multi-selection)
 pub fn move_selected_equipment(
     keyboard: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
@@ -749,58 +752,49 @@ pub fn move_selected_equipment(
     mut equipment_sprite_query: Query<(&mut Transform, &EquipmentSprite), Without<super::AttachmentSprite>>,
     mut attachment_sprite_query: Query<(&mut Transform, &super::AttachmentSprite), Without<EquipmentSprite>>,
 ) {
-    let Some(selected_id) = selected.selected_id else {
+    if selected.selected_ids.is_empty() {
         return;
-    };
+    }
 
     let move_speed = 200.0 * time.delta_secs();
 
-    // Try to move equipment first
-    let mut found = false;
+    // Calculate movement delta
+    let mut delta = Vec2::ZERO;
+    if keyboard.pressed(KeyCode::ArrowUp) {
+        delta.y += move_speed;
+    }
+    if keyboard.pressed(KeyCode::ArrowDown) {
+        delta.y -= move_speed;
+    }
+    if keyboard.pressed(KeyCode::ArrowLeft) {
+        delta.x -= move_speed;
+    }
+    if keyboard.pressed(KeyCode::ArrowRight) {
+        delta.x += move_speed;
+    }
+
+    if delta == Vec2::ZERO {
+        return;
+    }
+
+    // Move all selected equipment
     for (mut transform, equipment_sprite) in &mut equipment_sprite_query {
-        if equipment_sprite.equipment_id == selected_id {
-            // Move with arrow keys
-            if keyboard.pressed(KeyCode::ArrowUp) {
-                transform.translation.y += move_speed;
-            }
-            if keyboard.pressed(KeyCode::ArrowDown) {
-                transform.translation.y -= move_speed;
-            }
-            if keyboard.pressed(KeyCode::ArrowLeft) {
-                transform.translation.x -= move_speed;
-            }
-            if keyboard.pressed(KeyCode::ArrowRight) {
-                transform.translation.x += move_speed;
-            }
-            found = true;
-            break;
+        if selected.selected_ids.contains(&equipment_sprite.equipment_id) {
+            transform.translation.x += delta.x;
+            transform.translation.y += delta.y;
         }
     }
 
-    // If not equipment, try attachments
-    if !found {
-        for (mut transform, attachment_sprite) in &mut attachment_sprite_query {
-            if attachment_sprite.attachment_id == selected_id {
-                // Move with arrow keys
-                if keyboard.pressed(KeyCode::ArrowUp) {
-                    transform.translation.y += move_speed;
-                }
-                if keyboard.pressed(KeyCode::ArrowDown) {
-                    transform.translation.y -= move_speed;
-                }
-                if keyboard.pressed(KeyCode::ArrowLeft) {
-                    transform.translation.x -= move_speed;
-                }
-                if keyboard.pressed(KeyCode::ArrowRight) {
-                    transform.translation.x += move_speed;
-                }
-                break;
-            }
+    // Move all selected attachments
+    for (mut transform, attachment_sprite) in &mut attachment_sprite_query {
+        if selected.selected_ids.contains(&attachment_sprite.attachment_id) {
+            transform.translation.x += delta.x;
+            transform.translation.y += delta.y;
         }
     }
 }
 
-/// System to swap sprites between normal and selected versions based on selection
+/// System to swap sprites between normal and selected versions based on selection (supports multi-selection)
 pub fn update_selection_sprites(
     selected: Res<SelectedEquipment>,
     equipment_sprites: Res<EquipmentSprites>,
@@ -813,11 +807,9 @@ pub fn update_selection_sprites(
         return;
     }
 
-    let selected_id = selected.selected_id;
-
     // Update all equipment sprites
     for (mut sprite, equipment_sprite) in equipment_sprite_query.iter_mut() {
-        let is_selected = Some(equipment_sprite.equipment_id) == selected_id;
+        let is_selected = selected.selected_ids.contains(&equipment_sprite.equipment_id);
 
         // Choose the appropriate sprite (normal or selected)
         let sprite_handle = if is_selected {
@@ -834,7 +826,7 @@ pub fn update_selection_sprites(
 
     // Update all attachment sprites
     for (mut sprite, attachment_sprite) in attachment_sprite_query.iter_mut() {
-        let is_selected = Some(attachment_sprite.attachment_id) == selected_id;
+        let is_selected = selected.selected_ids.contains(&attachment_sprite.attachment_id);
 
         // Choose the appropriate sprite (normal or selected)
         let sprite_handle = if is_selected {
@@ -850,7 +842,7 @@ pub fn update_selection_sprites(
     }
 }
 
-/// System to delete selected attachment with Delete/Backspace key
+/// System to delete selected attachments with Delete/Backspace key (supports multi-selection)
 pub fn delete_selected_attachment(
     keyboard: Res<ButtonInput<KeyCode>>,
     selected: Res<SelectedEquipment>,
@@ -863,24 +855,23 @@ pub fn delete_selected_attachment(
         return;
     }
 
-    let Some(selected_id) = selected.selected_id else {
+    if selected.selected_ids.is_empty() {
         return;
-    };
+    }
 
-    // Find the attachment entity with this ID
+    // Find and delete all selected attachment entities
     for (entity, attachment_sprite) in &attachment_query {
-        if attachment_sprite.attachment_id == selected_id {
+        if selected.selected_ids.contains(&attachment_sprite.attachment_id) {
             // Remove from attachment manager
-            attachment_manager.attachments.retain(|a| a.id != selected_id);
+            attachment_manager.attachments.retain(|a| a.id != attachment_sprite.attachment_id);
 
             // Despawn the entity
             commands.entity(entity).despawn();
-            break;
         }
     }
 }
 
-/// System to detach selected attachment with 'X' key
+/// System to detach selected attachments with 'X' key (supports multi-selection)
 pub fn detach_selected_attachment(
     keyboard: Res<ButtonInput<KeyCode>>,
     selected: Res<SelectedEquipment>,
@@ -892,13 +883,13 @@ pub fn detach_selected_attachment(
         return;
     }
 
-    let Some(selected_id) = selected.selected_id else {
+    if selected.selected_ids.is_empty() {
         return;
-    };
+    }
 
-    // Find the attachment with this ID
+    // Detach all selected attachments
     for (transform, mut attachment_state, attachment_sprite) in &mut attachment_query {
-        if attachment_sprite.attachment_id == selected_id {
+        if selected.selected_ids.contains(&attachment_sprite.attachment_id) {
             // Check if it's currently attached
             if matches!(*attachment_state, super::AttachmentState::AttachedToEquipment { .. }) {
                 // Get current position
@@ -913,14 +904,24 @@ pub fn detach_selected_attachment(
                 if let Some(attachment_info) = attachment_manager
                     .attachments
                     .iter_mut()
-                    .find(|a| a.id == selected_id)
+                    .find(|a| a.id == attachment_sprite.attachment_id)
                 {
                     attachment_info.parent_equipment_id = None;
                 }
-
-                break;
             }
         }
+    }
+}
+
+/// System to sync outliner selection to SelectedEquipment resource
+pub fn sync_outliner_selection(
+    equipment_actions: Res<EquipmentTreeActions>,
+    mut selected: ResMut<SelectedEquipment>,
+) {
+    // If there's a change in outliner selection, sync it
+    if equipment_actions.is_changed() {
+        // Copy all selected IDs from the outliner
+        selected.selected_ids = equipment_actions.selected.clone();
     }
 }
 
