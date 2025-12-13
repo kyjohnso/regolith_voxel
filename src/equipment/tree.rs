@@ -108,6 +108,14 @@ impl EquipmentTreeNode {
         None
     }
 
+    /// Recursively collect all descendant IDs (children, grandchildren, etc.)
+    pub fn collect_all_descendant_ids(&self, ids: &mut HashSet<usize>) {
+        for child in &self.children {
+            ids.insert(child.id);
+            child.collect_all_descendant_ids(ids);
+        }
+    }
+
     /// Remove a node from the tree by ID
     pub fn remove_node(parent: &mut EquipmentTreeNode, id: usize) -> Option<EquipmentTreeNode> {
         // Check direct children
