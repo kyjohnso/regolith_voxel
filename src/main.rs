@@ -17,7 +17,8 @@ use equipment::{
     click_select_equipment, equipment_mining_system, load_equipment_sprites, load_attachment_sprites,
     move_selected_equipment, spawn_equipment_sprites, spawn_attachments, update_equipment_positions,
     update_attachment_positions, sync_outliner_selection, update_selection_sprites, delete_selected_attachment,
-    attach_selected_attachment, detach_selected_attachment, EquipmentTreeActions, EquipmentTreeState, SelectedEquipment,
+    attach_selected_attachment, detach_selected_attachment, load_into_truck, unload_from_truck, update_cargo_visuals,
+    EquipmentTreeActions, EquipmentTreeState, SelectedEquipment,
     AttachmentManager, SpawnAttachmentEvent, MountPointOccupancy,
 };
 use scene::{
@@ -72,6 +73,9 @@ fn main() {
                 delete_selected_attachment,
                 attach_selected_attachment,
                 detach_selected_attachment,
+                load_into_truck,
+                unload_from_truck,
+                update_cargo_visuals,
                 equipment_mining_system,
                 // Scene physics
                 cellular_automata_system,
